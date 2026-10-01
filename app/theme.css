@@ -1,0 +1,29 @@
+/* Light/dark theme without touching every component:
+   Tailwind v4 reads colours from CSS variables, so "light" mode simply
+   inverts the zinc scale and darkens the pastel accents. Dark is the default. */
+html { color-scheme: dark; }
+body { background: var(--color-zinc-950); color: var(--color-zinc-100); }
+
+html.light {
+  color-scheme: light;
+  --color-zinc-50:  oklch(0.141 0.005 285.823);
+  --color-zinc-100: oklch(0.21 0.006 285.885);
+  --color-zinc-200: oklch(0.274 0.006 286.033);
+  --color-zinc-300: oklch(0.37 0.013 285.805);
+  --color-zinc-400: oklch(0.442 0.017 285.786);
+  --color-zinc-500: oklch(0.552 0.016 285.938);
+  --color-zinc-600: oklch(0.705 0.015 286.067);
+  --color-zinc-700: oklch(0.871 0.006 286.286);
+  --color-zinc-800: oklch(0.92 0.004 286.32);
+  --color-zinc-900: oklch(0.967 0.001 286.375);
+  --color-zinc-950: oklch(0.985 0 0);
+
+  --color-sky-300: oklch(0.443 0.11 240.79);
+  --color-amber-300: oklch(0.555 0.163 48.998);
+  --color-rose-300: oklch(0.514 0.222 16.935);
+  --color-rose-400: oklch(0.586 0.253 17.585);
+  --color-emerald-400: oklch(0.596 0.145 163.225);
+  --color-indigo-200: oklch(0.359 0.144 278.697);
+  --color-indigo-300: oklch(0.457 0.24 277.023);
+  --color-indigo-400: oklch(0.511 0.262 276.966);
+}
