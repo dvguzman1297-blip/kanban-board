@@ -22,17 +22,29 @@ export default function LoginPage() {
   };
 
   return (
-    <AuthCard title="Welcome back" subtitle="Sign in to your workspace"
-      footer={<>No account? <Link href="/auth/register" className="text-indigo-300 hover:underline">Register</Link></>}>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <input type="email" required placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
-        <input type="password" required placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
-        {error && <p className="text-sm text-rose-400">{error}</p>}
-        <button disabled={loading} className={btnCls}>{loading ? "Signing in…" : "Sign in"}</button>
-        <div className="text-right">
-          <Link href="/auth/forgot-password" className="text-xs text-zinc-500 hover:text-zinc-300">Forgot password?</Link>
-        </div>
-      </form>
-    </AuthCard>
+    <AuthCard
+  title="Welcome back"
+  subtitle="Sign in to your workspace"
+  footer={
+    <div className="flex items-center justify-between text-xs text-zinc-500 w-full">
+      <span>
+        No account?{" "}
+        <Link href="/auth/register" className="text-indigo-300 hover:underline">
+          Register
+        </Link>
+      </span>
+      <Link href="/auth/forgot-password" className="hover:text-zinc-300">
+        Forgot password?
+      </Link>
+    </div>
+  }
+>
+  <form onSubmit={onSubmit} className="space-y-3">
+    <input type="email" required placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+    <input type="password" required placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
+    {error && <p className="text-sm text-rose-400">{error}</p>}
+    <button disabled={loading} className={btnCls}>{loading ? "Signing in…" : "Sign in"}</button>
+  </form>
+</AuthCard>
   );
 }
