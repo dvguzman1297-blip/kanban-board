@@ -4,8 +4,11 @@ import { BoardClient } from "@/components/board-client";
 import { BUCKET, SIGNED_URL_TTL } from "@/lib/attachments";
 import type { Attachment } from "@/lib/types";
 
-export default async function BoardPage({ params }: { params: Promise<{ boardId: string }> }) {
+export default async function BoardPage({ params, searchParams }: {
+  params: Promise<{ boardId: string }>; searchParams: Promise<{ card?: string }>;
+}) {
   const { boardId } = await params;
+  const { card: openCardId } = await searchParams;
   const supabase = await createClient();
 
   // RLS guarantees a foreign/unknown id simply returns null
@@ -28,6 +31,6 @@ export default async function BoardPage({ params }: { params: Promise<{ boardId:
 
   return (
     <BoardClient key={board.id} board={board} initialColumns={columns ?? []}
-      initialCards={cards ?? []} initialAttachments={attachments} />
+      initialCards={cards ?? []} initialAttachments={attachments} initialOpenCardId={openCardId ?? null} />
   );
 }

@@ -5,6 +5,7 @@ export type Card = {
   priority: "low" | "medium" | "high" | "urgent"; energy_level: "low" | "medium" | "high";
   due_date: string | null; subtasks: Subtask[]; order_index: number;
   color?: string | null; // palette key; null/undefined = use the column's colour
+  completed_at?: string | null; // set when the card enters the Done column
 };
 
 export type Attachment = {

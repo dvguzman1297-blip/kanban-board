@@ -26,4 +26,9 @@ html.light {
   --color-indigo-200: oklch(0.359 0.144 278.697);
   --color-indigo-300: oklch(0.457 0.24 277.023);
   --color-indigo-400: oklch(0.511 0.262 276.966);
+  --color-slate-300: oklch(0.372 0.044 257.287);
+  --color-orange-300: oklch(0.553 0.195 38.402);
+  --color-yellow-300: oklch(0.476 0.114 61.907);
+  --color-violet-300: oklch(0.491 0.27 292.581);
+  --color-emerald-300: oklch(0.508 0.118 165.612);
 }

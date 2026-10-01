@@ -4,11 +4,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   Pin, PinOff, Plus, Archive, ArchiveRestore, Trash2, LayoutDashboard, ChevronDown,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, X,
+  LogOut, Menu, PanelLeftClose, PanelLeftOpen, X, Home,
 } from "lucide-react";
 import { createBoard, togglePin, archiveBoard, deleteBoard } from "@/app/actions";
 import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppLogo } from "@/components/app-logo";
 
 type B = { id: string; name: string; is_pinned: boolean; is_archived: boolean };
 
@@ -84,7 +85,11 @@ export function Sidebar({ boards, wip, email }: { boards: B[]; wip: Record<strin
         mobileOpen ? "translate-x-0" : "-translate-x-full"} ${slim ? "md:w-14 md:px-2" : "md:w-64"}`}>
 
         <div className={`mb-4 flex items-center ${slim ? "flex-col gap-2" : "justify-between px-2"}`}>
-          {!slim && <span className="font-semibold tracking-tight">Boards</span>}
+          {slim ? <AppLogo className="h-7 w-7" /> : (
+            <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+              <AppLogo className="h-6 w-6" /> Kanban Workspace
+            </Link>
+          )}
           <div className={`flex items-center gap-1 ${slim ? "flex-col" : ""}`}>
             <button onClick={() => { if (slim) toggleCollapsed(); setAdding(true); }} title="New board"
               className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"><Plus className="h-4 w-4" /></button>
@@ -109,6 +114,10 @@ export function Sidebar({ boards, wip, email }: { boards: B[]; wip: Record<strin
         )}
 
         <nav className={`flex-1 space-y-4 overflow-y-auto ${pending ? "opacity-70" : ""}`}>
+          <Link href="/dashboard" title="Home"
+            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${path === "/dashboard" ? "bg-indigo-500/15 text-indigo-200" : "text-zinc-400 hover:bg-zinc-800/70"} ${slim ? "justify-center" : ""}`}>
+            <Home className="h-4 w-4 shrink-0" />{!slim && "Home"}
+          </Link>
           {pinned.length > 0 && (
             <div>
               {!slim && <p className="px-2 pb-1 text-[11px] uppercase tracking-wide text-zinc-600">Pinned</p>}

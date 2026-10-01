@@ -3,9 +3,15 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Pause, Play, RotateCcw, X } from "lucide-react";
 
-type FocusCard = { id: string; title: string };
-type Ctx = { startFocus: (c: FocusCard) => void };
-const FocusCtx = createContext<Ctx>({ startFocus: () => {} });
+type FocusCard = { id: string; title: string; boardId?: string };
+type Ctx = {
+  startFocus: (c: FocusCard) => void;
+  card: FocusCard | null; left: number; running: boolean;
+  open: () => void; toggle: () => void; stop: () => void;
+};
+const FocusCtx = createContext<Ctx>({
+  startFocus: () => {}, card: null, left: 25 * 60, running: false, open: () => {}, toggle: () => {}, stop: () => {},
+});
 export const useFocus = () => useContext(FocusCtx);
 
 const DURATION = 25 * 60;
@@ -37,7 +43,7 @@ export function FocusProvider({ children }: { children: React.ReactNode }) {
   const pct = ((DURATION - left) / DURATION) * 100;
 
   return (
-    <FocusCtx.Provider value={{ startFocus }}>
+    <FocusCtx.Provider value={{ startFocus, card, left, running, open: () => setOpen(true), toggle: () => setRunning((r) => !r), stop: endSession }}>
       {children}
 
       {/* Minimised "toast": click to reopen, X to end the session */}
