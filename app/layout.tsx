@@ -1,17 +1,14 @@
 import "./globals.css";
 import "./theme.css";
 import type { Metadata } from "next";
-import Script from "next/script";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
+import { ThemeInitializer } from "@/components/theme-initializer";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
 
 export const metadata: Metadata = { title: "FlowDeck", description: "FlowDeck collaborative workspace" };
-
-// Runs before paint so the saved theme never flashes.
-const themeScript = `try{if(localStorage.getItem("theme")==="light")document.documentElement.classList.add("light")}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -20,14 +17,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   if (!user) {
     return (
       <html lang="en" suppressHydrationWarning>
-        <head>
-          <Script
-            id="theme-script-unauth"
-            strategy="beforeInteractive"
-            dangerouslySetInnerHTML={{ __html: themeScript }}
-          />
-        </head>
-        <body className="antialiased">{children}</body>
+        <body className="antialiased">
+          <ThemeInitializer />
+          {children}
+        </body>
       </html>
     );
   }
@@ -73,14 +66,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <Script
-          id="theme-script"
-          strategy="beforeInteractive"
-          dangerouslySetInnerHTML={{ __html: themeScript }}
-        />
-      </head>
       <body className="antialiased">
+        <ThemeInitializer />
         <FocusProvider>
           <div className="flex h-dvh overflow-hidden">
             <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} userId={user.id} />

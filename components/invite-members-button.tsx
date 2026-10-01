@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { UserPlus, X } from "lucide-react";
 import { sendBoardInvite } from "@/app/actions";
 
@@ -18,7 +19,8 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
     event.preventDefault();
     setPending(true); setError("");
     try {
-      await sendBoardInvite(boardId, email, role);
+      const result = await sendBoardInvite(boardId, email, role);
+      if ("error" in result) { setError(result.error ?? "Could not send invitation."); return; }
       setSent(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not send invitation.");
@@ -33,7 +35,7 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
         className={`relative z-20 flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white ${compact ? "text-xs" : ""}`}>
         <UserPlus className="h-4 w-4" />{compact ? "Invite" : "Invite Members"}
       </button>
-      {open && (
+      {open && createPortal(
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 p-4" onMouseDown={(event) => event.target === event.currentTarget && close()}>
           <section role="dialog" aria-modal="true" aria-labelledby="invite-title" className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -71,7 +73,7 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
             )}
           </section>
         </div>
-      )}
+      , document.body)}
     </>
   );
 }

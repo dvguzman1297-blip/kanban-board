@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  if (["/flowdeck-mark.svg", "/icon.svg", "/apple-icon.png"].includes(path)) return NextResponse.next();
+  if (["/flowdeck-mark.svg", "/theme-init.js", "/icon.svg", "/apple-icon.png"].includes(path)) return NextResponse.next();
 
   let res = NextResponse.next({ request: req });
   const supabase = createServerClient(

@@ -17,15 +17,31 @@ const DEFAULT_COLS = [
   { name: "In Progress", wip_limit: 3 }, { name: "Blocked", wip_limit: null }, { name: "Done", wip_limit: null },
 ];
 
-export async function createBoard(name: string) {
+export async function createBoard(name: string): Promise<{ error: string } | void> {
+  const cleanName = name.trim().slice(0, 80);
+  if (!cleanName) return { error: "Enter a board name." };
+
   const supabase = await createClient();
-  const { data: board, error } = await supabase.from("boards").insert({ name }).select("id").single();
-  if (error) throw error;
-  await supabase.from("columns").insert(
-    DEFAULT_COLS.map((c, i) => ({ ...c, board_id: board.id, order_index: (i + 1) * 1000 }))
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { error: "Your session expired. Sign in again before creating a board." };
+
+  const boardId = crypto.randomUUID();
+  const { error } = await supabase.from("boards").insert({ id: boardId, name: cleanName, user_id: user.id });
+  if (error) {
+    console.error("createBoard: board insert failed", error);
+    return { error: `Could not create board: ${error.message}` };
+  }
+  const { error: columnsError } = await supabase.from("columns").insert(
+    DEFAULT_COLS.map((c, i) => ({ ...c, board_id: boardId, order_index: (i + 1) * 1000 }))
   );
+  if (columnsError) {
+    console.error("createBoard: default columns insert failed", columnsError);
+    const { error: cleanupError } = await supabase.from("boards").delete().eq("id", boardId);
+    if (cleanupError) console.error("createBoard: failed to clean up incomplete board", cleanupError);
+    return { error: `Could not create the board's default columns: ${columnsError.message}` };
+  }
   revalidatePath("/", "layout");
-  redirect(`/board/${board.id}`);
+  redirect(`/board/${boardId}`);
 }
 
 export async function renameBoard(id: string, name: string) {
@@ -143,53 +159,59 @@ export async function updateProfileName(fullName: string) {
 export async function sendBoardInvite(boardId: string, emailInput: string, roleInput: string) {
   const email = emailInput.trim().toLowerCase();
   const role = roleInput === "viewer" ? "viewer" : roleInput === "editor" ? "editor" : null;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
-  if (!role) throw new Error("Choose Editor or Viewer access.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Enter a valid email address." };
+  if (!role) return { ok: false, error: "Choose Editor or Viewer access." };
 
   const gmailUser = process.env.GMAIL_USER;
   const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, "");
   const appUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL;
   if (!gmailUser || !gmailAppPassword || !appUrl) {
-    throw new Error("Email invitations require GMAIL_USER, GMAIL_APP_PASSWORD, and NEXT_PUBLIC_SITE_URL.");
+    return { ok: false, error: "Email is not configured. Set GMAIL_USER, GMAIL_APP_PASSWORD, and NEXT_PUBLIC_SITE_URL in Vercel, then redeploy." };
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("You must be signed in.");
-  const { data: board, error: boardError } = await supabase.from("boards")
-    .select("id, name, user_id").eq("id", boardId).single();
-  if (boardError || !board || board.user_id !== user.id) throw new Error("Only the board owner can invite members.");
-
-  const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
-  const { error: inviteError } = await supabase.from("board_invites")
-    .insert({ board_id: boardId, email, role, token, expires_at: expiresAt });
-  if (inviteError) throw inviteError;
-
-  const inviteUrl = `${appUrl.replace(/\/$/, "")}/invite/accept?token=${encodeURIComponent(token)}`;
-  const safeBoardName = board.name.replace(/[&<>"']/g, (character: string) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character] ?? character);
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: { user: gmailUser, pass: gmailAppPassword },
-  });
   try {
-    await transporter.sendMail({
-      from: `FlowDeck <${gmailUser}>`,
-      to: email,
-      subject: `You're invited to ${board.name} on FlowDeck`,
-      html: `<div style="font-family:Arial,sans-serif;color:#18181b"><h1>FlowDeck</h1><p>You have been invited to join <strong>${safeBoardName}</strong> as ${role === "editor" ? "an editor" : "a viewer"}.</p><p><a href="${inviteUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Accept invitation</a></p><p>This invitation expires in 7 days.</p></div>`,
-      text: `You have been invited to join ${board.name} on FlowDeck as ${role === "editor" ? "an editor" : "a viewer"}. Accept: ${inviteUrl}\nThis invitation expires in 7 days.`,
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "You must be signed in." };
+    const { data: board, error: boardError } = await supabase.from("boards")
+      .select("id, name, user_id").eq("id", boardId).single();
+    if (boardError) throw boardError;
+    if (!board || board.user_id !== user.id) return { ok: false, error: "Only the board owner can invite members." };
+
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
+    const { error: inviteError } = await supabase.from("board_invites")
+      .insert({ board_id: boardId, email, role, token, expires_at: expiresAt });
+    if (inviteError) throw inviteError;
+
+    const inviteUrl = `${appUrl.replace(/\/$/, "")}/invite/accept?token=${encodeURIComponent(token)}`;
+    const safeBoardName = board.name.replace(/[&<>"']/g, (character: string) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[character] ?? character);
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: { user: gmailUser, pass: gmailAppPassword },
     });
+    try {
+      await transporter.sendMail({
+        from: `FlowDeck <${gmailUser}>`,
+        to: email,
+        subject: `You're invited to ${board.name} on FlowDeck`,
+        html: `<div style="font-family:Arial,sans-serif;color:#18181b"><h1>FlowDeck</h1><p>You have been invited to join <strong>${safeBoardName}</strong> as ${role === "editor" ? "an editor" : "a viewer"}.</p><p><a href="${inviteUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Accept invitation</a></p><p>This invitation expires in 7 days.</p></div>`,
+        text: `You have been invited to join ${board.name} on FlowDeck as ${role === "editor" ? "an editor" : "a viewer"}. Accept: ${inviteUrl}\nThis invitation expires in 7 days.`,
+      });
+    } catch (cause) {
+      await supabase.from("board_invites").delete().eq("token", token);
+      throw cause;
+    }
+    revalidatePath("/dashboard");
+    return { ok: true };
   } catch (cause) {
-    await supabase.from("board_invites").delete().eq("token", token);
-    throw new Error(`Gmail could not send the invitation: ${cause instanceof Error ? cause.message : "SMTP error"}`);
+    console.error("Failed to send FlowDeck board invitation", cause);
+    return { ok: false, error: "Could not send the invitation. Check the Vercel function logs for details." };
   }
-  revalidatePath("/dashboard");
-  return { sent: true };
 }
 
 export async function acceptBoardInvite(tokenInput: string) {

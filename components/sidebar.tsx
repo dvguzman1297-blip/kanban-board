@@ -17,6 +17,7 @@ export function Sidebar({ boards, wip, email, userId }: { boards: B[]; wip: Reco
   const path = usePathname();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [boardError, setBoardError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [collapsed, setCollapsed] = useState(false);   // desktop: icon-only rail
   const [mobileOpen, setMobileOpen] = useState(false); // mobile: off-canvas drawer
@@ -106,10 +107,16 @@ export function Sidebar({ boards, wip, email, userId }: { boards: B[]; wip: Reco
           <form className="mb-3" onSubmit={(e) => {
             e.preventDefault();
             if (!name.trim()) return;
-            const n = name.trim(); setName(""); setAdding(false); start(() => createBoard(n));
+            const n = name.trim();
+            setBoardError("");
+            start(async () => {
+              const result = await createBoard(n);
+              if (result && "error" in result) setBoardError(result.error);
+            });
           }}>
             <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setAdding(false)} placeholder="New board name"
               className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-indigo-500" />
+            {boardError && <p role="alert" className="mt-1 break-words text-xs text-rose-400">{boardError}</p>}
           </form>
         )}
 
