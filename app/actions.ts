@@ -1,4 +1,5 @@
 "use server";
+import nodemailer from "nodemailer";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -87,7 +88,10 @@ export async function moveCard(id: string, column_id: string, order_index: numbe
 }
 export async function updateCard(id: string, patch: Record<string, unknown>) {
   const supabase = await createClient();
-  const { error } = await supabase.from("cards").update(patch).eq("id", id);
+  const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "subtasks", "color"]);
+  const safePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
+  if (!Object.keys(safePatch).length) return;
+  const { error } = await supabase.from("cards").update(safePatch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteCard(id: string) {
@@ -120,4 +124,124 @@ export async function quickCreateCard(input: {
   revalidatePath("/dashboard");
   revalidatePath(`/board/${input.board_id}`);
   return data;
+}
+
+export async function updateProfileName(fullName: string) {
+  const clean = fullName.trim().slice(0, 80);
+  if (!clean) throw new Error("A name is required.");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+  const firstName = clean.split(/\s+/)[0];
+  const { error: authError } = await supabase.auth.updateUser({ data: { full_name: clean, first_name: firstName } });
+  if (authError) throw authError;
+  const { error } = await supabase.from("profiles").update({ full_name: clean, first_name: firstName }).eq("id", user.id);
+  if (error) throw error;
+  revalidatePath("/", "layout");
+}
+
+export async function sendBoardInvite(boardId: string, emailInput: string, roleInput: string) {
+  const email = emailInput.trim().toLowerCase();
+  const role = roleInput === "viewer" ? "viewer" : roleInput === "editor" ? "editor" : null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
+  if (!role) throw new Error("Choose Editor or Viewer access.");
+
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, "");
+  const appUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL;
+  if (!gmailUser || !gmailAppPassword || !appUrl) {
+    throw new Error("Email invitations require GMAIL_USER, GMAIL_APP_PASSWORD, and NEXT_PUBLIC_SITE_URL.");
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+  const { data: board, error: boardError } = await supabase.from("boards")
+    .select("id, name, user_id").eq("id", boardId).single();
+  if (boardError || !board || board.user_id !== user.id) throw new Error("Only the board owner can invite members.");
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 7 * 864e5).toISOString();
+  const { error: inviteError } = await supabase.from("board_invites")
+    .insert({ board_id: boardId, email, role, token, expires_at: expiresAt });
+  if (inviteError) throw inviteError;
+
+  const inviteUrl = `${appUrl.replace(/\/$/, "")}/invite/accept?token=${encodeURIComponent(token)}`;
+  const safeBoardName = board.name.replace(/[&<>"']/g, (character: string) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character] ?? character);
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: { user: gmailUser, pass: gmailAppPassword },
+  });
+  try {
+    await transporter.sendMail({
+      from: `FlowDeck <${gmailUser}>`,
+      to: email,
+      subject: `You're invited to ${board.name} on FlowDeck`,
+      html: `<div style="font-family:Arial,sans-serif;color:#18181b"><h1>FlowDeck</h1><p>You have been invited to join <strong>${safeBoardName}</strong> as ${role === "editor" ? "an editor" : "a viewer"}.</p><p><a href="${inviteUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Accept invitation</a></p><p>This invitation expires in 7 days.</p></div>`,
+      text: `You have been invited to join ${board.name} on FlowDeck as ${role === "editor" ? "an editor" : "a viewer"}. Accept: ${inviteUrl}\nThis invitation expires in 7 days.`,
+    });
+  } catch (cause) {
+    await supabase.from("board_invites").delete().eq("token", token);
+    throw new Error(`Gmail could not send the invitation: ${cause instanceof Error ? cause.message : "SMTP error"}`);
+  }
+  revalidatePath("/dashboard");
+  return { sent: true };
+}
+
+export async function acceptBoardInvite(tokenInput: string) {
+  const token = tokenInput.trim();
+  if (!token || token.length > 100) throw new Error("This invitation link is invalid.");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) throw new Error("Sign in with the email address this invitation was sent to.");
+  const { data: invite, error } = await supabase.from("board_invites")
+    .select("id, board_id, email, role, expires_at").eq("token", token).maybeSingle();
+  if (error || !invite || invite.email.toLowerCase() !== user.email.toLowerCase() || new Date(invite.expires_at) <= new Date()) {
+    throw new Error("This invitation is invalid, expired, or belongs to another email address.");
+  }
+  const { data: board } = await supabase.from("boards").select("name").eq("id", invite.board_id).maybeSingle();
+  const { error: memberError } = await supabase.from("board_members").insert({
+    board_id: invite.board_id, user_id: user.id, role: invite.role, status: "accepted",
+  });
+  if (memberError) throw new Error(memberError.code === "23505" ? "You already belong to this board." : "Could not accept this invitation.");
+  await supabase.from("board_invites").delete().eq("id", invite.id);
+  revalidatePath("/dashboard");
+  revalidatePath(`/board/${invite.board_id}`);
+  return { boardId: invite.board_id, boardName: board?.name ?? "your shared board" };
+}
+
+export async function createCardComment(cardId: string, contentInput: string) {
+  const content = contentInput.trim();
+  if (!content || content.length > 5000) throw new Error("Comments must be between 1 and 5,000 characters.");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+  const { data, error } = await supabase.from("card_comments")
+    .insert({ card_id: cardId, user_id: user.id, content }).select().single();
+  if (error) throw error;
+  return { ...data, author: { id: user.id, first_name: user.user_metadata?.first_name ?? null, full_name: user.user_metadata?.full_name ?? null } };
+}
+
+export async function updateCardComment(commentId: string, contentInput: string) {
+  const content = contentInput.trim();
+  if (!content || content.length > 5000) throw new Error("Comments must be between 1 and 5,000 characters.");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+  const { data, error } = await supabase.from("card_comments").update({ content, updated_at: new Date().toISOString() })
+    .eq("id", commentId).eq("user_id", user.id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCardComment(commentId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+  const { error } = await supabase.from("card_comments").delete().eq("id", commentId).eq("user_id", user.id);
+  if (error) throw error;
 }

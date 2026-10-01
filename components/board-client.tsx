@@ -9,19 +9,20 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Search, AlertTriangle, Pencil, ChevronsLeft, ChevronsRight, ChevronDown, TrendingUp, Ban, Clock,
-  Columns3, List, CalendarDays, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
+  Columns3, List, CalendarDays, CalendarRange, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
 } from "lucide-react";
 import { createCard, moveCard, updateCard, deleteCard, renameBoard } from "@/app/actions";
 import { CardModal } from "@/components/card-modal";
+import { InviteMembersButton } from "@/components/invite-members-button";
 import { CardView } from "@/components/card-view";
-import { ListView, CalendarView } from "@/components/board-views";
+import { ListView, CalendarView, TimelineView } from "@/components/board-views";
 import { createClient } from "@/lib/supabase/client";
 import { BUCKET, MAX_BYTES, SIGNED_URL_TTL, safeName } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, columnColor, effectiveColor, type ColorKey } from "@/lib/colors";
 import { isBlockedName, isDoneName, toISO } from "@/lib/board-utils";
-import type { Attachment, Card, Column } from "@/lib/types";
+import type { Attachment, Card, CardComment, Column } from "@/lib/types";
 
-type View = "kanban" | "list" | "calendar";
+type View = "kanban" | "list" | "calendar" | "timeline";
 type GroupBy = "none" | "priority" | "energy" | "color";
 type CardAttrs = Partial<Pick<Card, "priority" | "energy_level" | "color">>;
 
@@ -48,9 +49,10 @@ const wipTitle = (c: Column, n: number) =>
   : n > c.wip_limit ? `WIP limit exceeded: ${n} cards, limit is ${c.wip_limit}`
   : n === c.wip_limit ? `At WIP limit (${c.wip_limit}) — finish something before pulling more` : `${n} of ${c.wip_limit} slots used`;
 
-export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialOpenCardId }: {
+export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
   board: { id: string; name: string; description: string | null };
-  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialOpenCardId?: string | null;
+  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[];
+  currentUser: { id: string; name: string }; canInvite: boolean; canEdit?: boolean; canAdmin?: boolean; initialOpenCardId?: string | null;
 }) {
   const [cards, setCards] = useState<Card[]>(initialCards);
   const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments);
@@ -291,7 +293,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   };
 
   /* ---------- render ---------- */
-  const cardProps = { attByCard, previews, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }) };
+  const cardProps = { attByCard, previews, canEdit, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }) };
   const tplVars = {
     "--tpl-sm": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(78vw,1fr)")).join(" "),
     "--tpl-md": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(11rem,1fr)")).join(" "),
@@ -299,9 +301,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   const gridCls = "grid gap-3 md:gap-4 [grid-template-columns:var(--tpl-sm)] md:[grid-template-columns:var(--tpl-md)]";
   const ctl = "h-9 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-sm capitalize outline-none focus:border-indigo-500";
   const views: [View, string, React.ReactNode][] = [
-    ["kanban", "Kanban", <Columns3 key="k" className="h-4 w-4" />],
+    ["kanban", "Board View", <Columns3 key="k" className="h-4 w-4" />],
     ["list", "List", <List key="l" className="h-4 w-4" />],
     ["calendar", "Calendar", <CalendarDays key="c" className="h-4 w-4" />],
+    ["timeline", "Timeline / Gantt", <CalendarRange key="t" className="h-4 w-4" />],
   ];
 
   return (
@@ -319,10 +322,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
             ) : (
               <div className="group flex items-center gap-2">
                 <h1 className="truncate text-lg font-semibold">{name}</h1>
-                <button onClick={() => { setDraft(name); setRenaming(true); }} title="Rename board" aria-label="Rename board"
+                {canAdmin && <button onClick={() => { setDraft(name); setRenaming(true); }} title="Rename board" aria-label="Rename board"
                   className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 md:opacity-0 md:group-hover:opacity-100">
                   <Pencil className="h-3.5 w-3.5" />
-                </button>
+                </button>}
               </div>
             )}
             {board.description && <p className="text-xs text-zinc-500">{board.description}</p>}
@@ -343,6 +346,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 
           {/* View switcher */}
           <div className="ml-auto flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+            {canInvite && <div className="mr-1"><InviteMembersButton boardId={board.id} boardName={name} /></div>}
             {views.map(([v, label, icon]) => (
               <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm ${view === v ? "bg-indigo-600 text-white" : "text-zinc-400 hover:text-zinc-100"}`}>
@@ -386,9 +390,11 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 
       {view === "list" && <ListView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "calendar" && <CalendarView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
+      {view === "timeline" && <TimelineView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId}
+        onDateChange={(id, start_date, due_date) => saveCard(id, { start_date, due_date })} />}
 
       {view === "kanban" && (
-        <DndContext sensors={sensors} collisionDetection={closestCorners}
+        <DndContext id={`board-${board.id}`} sensors={sensors} collisionDetection={closestCorners}
           onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
           onDragCancel={() => { setActiveId(null); setCards(dragStartCards.current); }}>
           {!lanesOn ? (
@@ -455,7 +461,8 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
       <AnimatePresence>
         {editingCard && (
           <CardModal key={editingCard.id} card={editingCard} columnColor={colColors[editingCard.column_id]}
-            attachments={attByCard[editingCard.id] ?? []} onUpload={uploadFiles} onRemoveAttachment={removeAttachment}
+            attachments={attByCard[editingCard.id] ?? []} comments={initialComments.filter((comment) => comment.card_id === editingCard.id)}
+            currentUser={currentUser} readOnly={!canEdit} onUpload={uploadFiles} onRemoveAttachment={removeAttachment}
             onSave={(patch) => saveCard(editingCard.id, patch)}
             onDelete={() => removeCard(editingCard.id)}
             onClose={() => setEditingId(null)} />
@@ -467,7 +474,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 
 /* ====================== columns ====================== */
 type CardActions = {
-  attByCard: Record<string, Attachment[]>; previews: boolean;
+  attByCard: Record<string, Attachment[]>; previews: boolean; canEdit: boolean;
   onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
 };
 
@@ -475,10 +482,10 @@ function ColumnHeader({ column, colorKey, totalCount, onToggle }:
   { column: Column; colorKey: ColorKey; totalCount: number; onToggle: () => void }) {
   const st = wipState(column, totalCount);
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-3">
-      <h2 className="flex min-w-0 items-center gap-2 text-sm font-medium">
+    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
+      <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${PALETTE[colorKey].dot}`} />
-        <span className="truncate">{column.name}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{column.name}</span>
       </h2>
       <div className="flex shrink-0 items-center gap-1">
         <span title={wipTitle(column, totalCount)} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
@@ -526,7 +533,7 @@ function EmptyDrop({ name, filtered, isOver }: { name: string; filtered: boolean
   );
 }
 
-function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggleCollapse, onAdd, attByCard, previews, onEdit, onDelete, onRename }: {
+function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggleCollapse, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
   column: Column; colorKey: ColorKey; cards: Card[]; totalCount: number; collapsed: boolean;
   onToggleCollapse: () => void; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
@@ -569,18 +576,18 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
           <AnimatePresence initial={false}>
             {cards.map((c) => (
               <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
-                attachments={attByCard[c.id] ?? []} previews={previews} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
+                attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
             ))}
           </AnimatePresence>
         </div>
       </SortableContext>
 
-      <div className="p-3 pt-1"><AddCard onAdd={onAdd} /></div>
+      {canEdit && <div className="p-3 pt-1"><AddCard onAdd={onAdd} /></div>}
     </section>
   );
 }
 
-function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCard, previews, onEdit, onDelete, onRename }: {
+function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
   laneKey: string; column: Column; colorKey: ColorKey; cards: Card[]; collapsed: boolean; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
   const { setNodeRef, isOver } = useDroppable({ id: `cell|${laneKey}|${column.id}` });
@@ -593,25 +600,26 @@ function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCar
         <AnimatePresence initial={false}>
           {cards.map((c) => (
             <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
-              attachments={attByCard[c.id] ?? []} previews={previews} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
+              attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
           ))}
         </AnimatePresence>
       </SortableContext>
-      <AddCard onAdd={onAdd} />
+      {canEdit && <AddCard onAdd={onAdd} />}
     </div>
   );
 }
 
-function SortableCard({ card, colorKey, attachments, previews, onEdit, onDelete, onRename }: {
-  card: Card; colorKey: ColorKey; attachments: Attachment[]; previews: boolean;
+function SortableCard({ card, colorKey, attachments, previews, canEdit, onEdit, onDelete, onRename }: {
+  card: Card; colorKey: ColorKey; attachments: Attachment[]; previews: boolean; canEdit: boolean;
   onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, disabled: !canEdit });
   return (
     <motion.div layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }}>
       <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.35 : 1 }}
         {...attributes} {...listeners}>
         <CardView card={card} colorKey={colorKey} attachments={attachments} showPreviews={previews}
+          canEdit={canEdit}
           onEdit={() => onEdit(card.id)} onRename={(t) => onRename(card.id, t)}
           onDelete={() => confirm("Delete this card?") && onDelete(card.id)} />
       </div>

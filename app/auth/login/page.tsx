@@ -17,13 +17,14 @@ export default function LoginPage() {
     setLoading(true); setError(null);
     const { error } = await createClient().auth.signInWithPassword({ email, password });
     if (error) { setError(error.message); setLoading(false); return; }
-    router.replace("/");
+    const next = new URLSearchParams(window.location.search).get("next");
+    router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/");
     router.refresh();
   };
 
   return (
     <AuthCard
-  title="Welcome back"
+  title="Welcome back to FlowDeck"
   subtitle="Sign in to your workspace"
   footer={
     <div className="flex items-center justify-between text-xs text-zinc-500 w-full">

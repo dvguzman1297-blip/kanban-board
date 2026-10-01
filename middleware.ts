@@ -2,6 +2,9 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
+  const path = req.nextUrl.pathname;
+  if (["/flowdeck-mark.svg", "/icon.svg", "/apple-icon.png"].includes(path)) return NextResponse.next();
+
   let res = NextResponse.next({ request: req });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,12 +21,12 @@ export async function middleware(req: NextRequest) {
     }
   );
   const { data: { user } } = await supabase.auth.getUser();
-  const path = req.nextUrl.pathname;
   const isAuthRoute = path.startsWith("/auth");
+  const isInviteAcceptance = path === "/invite/accept";
   // These must stay reachable while signed in (recovery link creates a session)
   const allowWhenSignedIn = path.startsWith("/auth/reset-password") || path.startsWith("/auth/callback");
 
-  if (!user && !isAuthRoute) return NextResponse.redirect(new URL("/auth/login", req.url));
+  if (!user && !isAuthRoute && !isInviteAcceptance) return NextResponse.redirect(new URL("/auth/login", req.url));
   if (user && isAuthRoute && !allowWhenSignedIn) return NextResponse.redirect(new URL("/", req.url));
   return res;
 }

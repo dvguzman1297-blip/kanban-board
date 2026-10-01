@@ -1,4 +1,4 @@
-# kanban-board
+# FlowDeck
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
@@ -17,6 +17,10 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+## Email Invitations
+
+Set `GMAIL_USER`, `GMAIL_APP_PASSWORD`, and `NEXT_PUBLIC_SITE_URL` in the deployment environment to enable board invitations. Use a Google App Password, not your regular Gmail password. Apply `supabase/migrations/006_collaboration.sql` in the Supabase SQL Editor, or use the complete `supabase/schema.sql` for a new database.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

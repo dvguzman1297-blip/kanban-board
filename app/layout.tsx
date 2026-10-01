@@ -8,7 +8,7 @@ import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
 
-export const metadata: Metadata = { title: "Kanban Workspace", description: "Solo multi-board Kanban" };
+export const metadata: Metadata = { title: "FlowDeck", description: "FlowDeck collaborative workspace" };
 
 // Runs before paint so the saved theme never flashes.
 const themeScript = `try{if(localStorage.getItem("theme")==="light")document.documentElement.classList.add("light")}catch(e){}`;
@@ -32,10 +32,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     );
   }
 
-  const [{ data: boards }, { data: cols }, { data: cards }] = await Promise.all([
-    supabase.from("boards").select("id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
+  const [{ data: boards }, { data: cols }, { data: cards }, { data: profile }] = await Promise.all([
+    supabase.from("boards").select("id, user_id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
     supabase.from("columns").select("id, board_id, name, wip_limit"),
     supabase.from("cards").select("column_id, board_id, due_date"),
+    supabase.from("profiles").select("first_name, full_name").eq("id", user.id).maybeSingle(),
   ]);
 
   const boardList = boards ?? [];
@@ -65,7 +66,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   if (blocked > 0) alerts.unshift({ tone: "rose", href: "/dashboard", text: `${blocked} blocked card${blocked === 1 ? "" : "s"} need attention` });
   if (overdue > 0) alerts.unshift({ tone: "amber", href: "/dashboard", text: `${overdue} overdue card${overdue === 1 ? "" : "s"}` });
 
-  const displayName = ((user.user_metadata?.full_name as string | undefined) ?? "").trim();
+  const metadataFirst = String(user.user_metadata?.first_name ?? "").trim();
+  const profileFirst = String(profile?.first_name ?? "").trim();
+  const fullName = String(user.user_metadata?.full_name || profile?.full_name || "").trim();
+  const displayName = metadataFirst || profileFirst || fullName;
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -79,7 +83,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="antialiased">
         <FocusProvider>
           <div className="flex h-dvh overflow-hidden">
-            <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} />
+            <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} userId={user.id} />
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
               <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} />
               <main className="min-h-0 flex-1 overflow-hidden">{children}</main>

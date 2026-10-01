@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.flowdeck-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.125rem;
+  min-height: 1.5rem;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  transition: max-height 140ms ease, min-height 140ms ease, margin-top 140ms ease, opacity 140ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .flowdeck-card-actions {
+    max-height: 0;
+    min-height: 0;
+    margin-top: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .group:hover .flowdeck-card-actions,
+  .group:focus-within .flowdeck-card-actions {
+    max-height: 1.5rem;
+    min-height: 1.5rem;
+    margin-top: 0.25rem;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

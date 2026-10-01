@@ -1,13 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <defs><clipPath id="tile"><rect width="512" height="512" rx="96"/></clipPath></defs>
+  <defs>
+    <clipPath id="tile"><rect width="512" height="512" rx="96"/></clipPath>
+  </defs>
   <g clip-path="url(#tile)">
     <path fill="#B8EAE3" d="M0 0h512v512H0z"/>
     <path fill="#0A7E83" d="M202 0h142v512H202z"/>
     <path fill="#073D4B" d="M0 0h202v512H0z"/>
+
     <rect x="68" y="78" width="91" height="360" rx="16" stroke="#F5FFFC" stroke-width="18"/>
     <path d="M113 282V165m0 0-29 31m29-31 29 31" stroke="#F5FFFC" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+
     <path d="M235 78h87v82c0 16-13 29-29 29h-33c-17 0-30 13-30 30v43c0 17 13 30 30 30h42c18 0 32 14 32 32v39" stroke="#F5FFFC" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
     <rect x="252" y="287" width="45" height="43" rx="8" fill="#F5FFFC"/>
+
     <rect x="356" y="79" width="91" height="267" rx="16" stroke="#073D4B" stroke-width="18"/>
     <path d="M310 211h95m0 0-28-28m28 28-28 28" stroke="#073D4B" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="358" y="405" fill="#073D4B" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700">Flow</text>

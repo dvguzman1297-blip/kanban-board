@@ -21,21 +21,21 @@ export const ENERGY_STYLE: Record<Card["energy_level"], string> = {
 
 export function PriorityBadge({ value }: { value: Card["priority"] }) {
   return (
-    <span title={`Priority: ${value}`} className={`flex items-center gap-1 rounded px-1.5 py-0.5 capitalize ${PRIORITY_STYLE[value]}`}>
-      <Flag className="h-3 w-3" />{value}
+    <span title={`Priority: ${value}`} className={`flex min-w-0 max-w-full items-center gap-1 break-words rounded px-1.5 py-0.5 capitalize ${PRIORITY_STYLE[value]}`}>
+      <Flag className="h-3 w-3 shrink-0" />{value}
     </span>
   );
 }
 export function EnergyBadge({ value }: { value: Card["energy_level"] }) {
   return (
-    <span title={`Energy: ${value}`} className={`flex items-center gap-1 rounded px-1.5 py-0.5 capitalize ${ENERGY_STYLE[value]}`}>
-      <Zap className="h-3 w-3" />{value}
+    <span title={`Energy: ${value}`} className={`flex min-w-0 max-w-full items-center gap-1 break-words rounded px-1.5 py-0.5 capitalize ${ENERGY_STYLE[value]}`}>
+      <Zap className="h-3 w-3 shrink-0" />{value}
     </span>
   );
 }
 
-export function CardView({ card, colorKey, overlay, attachments = [], showPreviews = true, onEdit, onDelete, onRename }: {
-  card: Card; colorKey: ColorKey; overlay?: boolean; attachments?: Attachment[]; showPreviews?: boolean;
+export function CardView({ card, colorKey, overlay, attachments = [], showPreviews = true, canEdit = true, onEdit, onDelete, onRename }: {
+  card: Card; colorKey: ColorKey; overlay?: boolean; attachments?: Attachment[]; showPreviews?: boolean; canEdit?: boolean;
   onEdit?: () => void; onDelete?: () => void; onRename?: (title: string) => void;
 }) {
   const { startFocus } = useFocus();
@@ -56,12 +56,12 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
 
   // Keep toolbar buttons / the rename input from starting a drag or opening the editor
   const stop = { onPointerDown: (e: React.PointerEvent) => e.stopPropagation() };
-  const btn = "rounded p-1 text-zinc-500 hover:bg-zinc-800/60 md:opacity-0 md:group-hover:opacity-100";
+  const btn = "rounded p-1 text-zinc-500 hover:bg-zinc-800/60";
 
   return (
     <div className={`rounded-lg bg-zinc-950 ${overlay ? "rotate-2 shadow-2xl" : ""}`}>
       <div onClick={onEdit}
-        className={`group cursor-pointer rounded-lg border p-3 text-sm shadow-sm ${PALETTE[colorKey].card} ${overlay ? "ring-1 ring-indigo-500" : ""}`}>
+        className={`group relative cursor-pointer rounded-lg border p-3 text-sm shadow-sm ${PALETTE[colorKey].card} ${overlay ? "ring-1 ring-indigo-500" : ""}`}>
         {showPreviews && attachments.length > 0 && <AttachmentPreview attachments={attachments} />}
 
         <div className="flex items-start gap-2">
@@ -77,21 +77,11 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
               }}
               className="min-w-0 flex-1 rounded border border-indigo-500 bg-zinc-950 px-1.5 py-0.5 text-sm outline-none" />
           ) : (
-            <p className="min-w-0 flex-1 break-words leading-snug">{card.title}</p>
-          )}
-          {!overlay && !renaming && (
-            <div className="-mr-1 -mt-1 flex shrink-0">
-              <button {...stop} onClick={(e) => { e.stopPropagation(); startFocus({ id: card.id, title: card.title, boardId: card.board_id }); }}
-                title="Start focus (Pomodoro)" aria-label="Start focus" className={`${btn} hover:text-indigo-400`}><Play className="h-3.5 w-3.5" /></button>
-              <button {...stop} onClick={(e) => { e.stopPropagation(); setDraft(card.title); setRenaming(true); }}
-                title="Quick rename" aria-label="Quick rename" className={`${btn} hover:text-zinc-200`}><PencilLine className="h-3.5 w-3.5" /></button>
-              <button {...stop} onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
-                title="Edit details" aria-label="Edit details" className={`${btn} hover:text-zinc-200`}><SquarePen className="h-3.5 w-3.5" /></button>
-              <button {...stop} onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
-                title="Delete card" aria-label="Delete card" className={`${btn} hover:text-rose-400`}><Trash2 className="h-3.5 w-3.5" /></button>
-            </div>
+            <p className="min-w-0 flex-1 break-words leading-snug [overflow-wrap:anywhere]">{card.title}</p>
           )}
         </div>
+
+        {card.description && <p className="mt-1 ml-6 line-clamp-2 break-words text-xs leading-snug text-zinc-500 [overflow-wrap:anywhere]">{card.description}</p>}
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
           <PriorityBadge value={card.priority} />
@@ -104,6 +94,21 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
         {subs.length > 0 && (
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-500/20">
             <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+
+        {!overlay && !renaming && (
+          <div className="flowdeck-card-actions">
+            <button {...stop} onClick={(e) => { e.stopPropagation(); startFocus({ id: card.id, title: card.title, boardId: card.board_id }); }}
+              title="Start focus (Pomodoro)" aria-label="Start focus" className={`${btn} hover:text-indigo-400`}><Play className="h-3.5 w-3.5" /></button>
+            {canEdit && <>
+              <button {...stop} onClick={(e) => { e.stopPropagation(); setDraft(card.title); setRenaming(true); }}
+                title="Quick rename" aria-label="Quick rename" className={`${btn} hover:text-zinc-200`}><PencilLine className="h-3.5 w-3.5" /></button>
+              <button {...stop} onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
+                title="Edit details" aria-label="Edit details" className={`${btn} hover:text-zinc-200`}><SquarePen className="h-3.5 w-3.5" /></button>
+              <button {...stop} onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
+                title="Delete card" aria-label="Delete card" className={`${btn} hover:text-rose-400`}><Trash2 className="h-3.5 w-3.5" /></button>
+            </>}
           </div>
         )}
       </div>

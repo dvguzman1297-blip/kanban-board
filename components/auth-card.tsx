@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { LayoutDashboard } from "lucide-react";
+import { AppLogo } from "@/components/app-logo";
 
 export function AuthCard({ title, subtitle, children, footer }:
   { title: string; subtitle?: string; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900/70 p-8 shadow-2xl">
       <Link href="/" className="mb-6 flex items-center gap-2 text-sm font-semibold text-indigo-300">
-        <LayoutDashboard className="h-5 w-5" /> Kanban Workspace
+        <AppLogo className="h-6 w-6" /> FlowDeck
       </Link>
       <h1 className="text-xl font-semibold">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>}

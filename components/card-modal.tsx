@@ -3,14 +3,16 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Check, FileText, Paperclip, Plus, Trash2, X } from "lucide-react";
 import type { Attachment, Card, Subtask } from "@/lib/types";
+import type { CardComment } from "@/lib/types";
+import { CardComments } from "@/components/card-comments";
 import { formatSize, isImage } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, type ColorKey } from "@/lib/colors";
 
 const field = "w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-indigo-500";
 const label = "mb-1 block text-xs font-medium text-zinc-500";
 
-export function CardModal({ card, columnColor, attachments, onUpload, onRemoveAttachment, onSave, onDelete, onClose }: {
-  card: Card; columnColor: ColorKey; attachments: Attachment[];
+export function CardModal({ card, columnColor, attachments, comments, currentUser, readOnly = false, onUpload, onRemoveAttachment, onSave, onDelete, onClose }: {
+  card: Card; columnColor: ColorKey; attachments: Attachment[]; comments: CardComment[]; currentUser: { id: string; name: string }; readOnly?: boolean;
   onUpload: (cardId: string, files: File[]) => Promise<string[]>; onRemoveAttachment: (a: Attachment) => void;
   onSave: (patch: Partial<Card>) => void; onDelete: () => void; onClose: () => void;
 }) {
@@ -72,7 +74,7 @@ export function CardModal({ card, columnColor, attachments, onUpload, onRemoveAt
           <button onClick={onClose} aria-label="Close" className="rounded p-1 text-zinc-500 hover:text-zinc-200"><X className="h-5 w-5" /></button>
         </div>
 
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4 border-0 p-0">
           <div>
             <label className={label}>Title</label>
             <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className={field} />
@@ -173,7 +175,7 @@ export function CardModal({ card, columnColor, attachments, onUpload, onRemoveAt
                   <input type="checkbox" checked={s.done}
                     onChange={() => setSubtasks((all) => all.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x)))}
                     className="h-4 w-4 accent-indigo-500" />
-                  <span className={`flex-1 ${s.done ? "text-zinc-500 line-through" : ""}`}>{s.title}</span>
+                  <span className={`min-w-0 flex-1 break-words [overflow-wrap:anywhere] ${s.done ? "text-zinc-500 line-through" : ""}`}>{s.title}</span>
                   <button onClick={() => setSubtasks((all) => all.filter((x) => x.id !== s.id))} aria-label="Remove subtask"
                     className="text-zinc-500 hover:text-rose-400"><X className="h-4 w-4" /></button>
                 </li>
@@ -185,16 +187,18 @@ export function CardModal({ card, columnColor, attachments, onUpload, onRemoveAt
               <button onClick={addSub} aria-label="Add subtask" className="rounded-lg border border-zinc-800 px-3 hover:bg-zinc-800"><Plus className="h-4 w-4" /></button>
             </div>
           </div>
-        </div>
+        </fieldset>
+        <CardComments cardId={card.id} initialComments={comments} currentUser={currentUser} />
 
         <div className="mt-6 flex items-center justify-between">
-          <button onClick={() => confirm("Delete this card?") && (onDelete(), onClose())}
+          {!readOnly && <button onClick={() => confirm("Delete this card?") && (onDelete(), onClose())}
             className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-rose-400 hover:bg-rose-500/10">
             <Trash2 className="h-4 w-4" /> Delete
-          </button>
+          </button>}
           <div className="flex gap-2">
-            <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">Cancel</button>
-            <button onClick={save} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
+            {!readOnly && <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-800">Cancel</button>}
+            {readOnly ? <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800">Close</button>
+              : <button onClick={save} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>}
           </div>
         </div>
       </motion.div>

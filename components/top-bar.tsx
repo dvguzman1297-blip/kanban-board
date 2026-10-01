@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { QuickTaskModal } from "@/components/quick-task-modal";
+import { updateProfileName } from "@/app/actions";
 
 type Board = { id: string; name: string; is_archived: boolean };
 export type Alert = { text: string; href: string; tone: "rose" | "amber" };
@@ -54,9 +55,12 @@ export function TopBar({ boards, alerts, email, displayName }: { boards: Board[]
 
   const saveName = async () => {
     setSaving(true);
-    await createClient().auth.updateUser({ data: { full_name: nameDraft.trim() } });
-    setSaving(false);
-    router.refresh();
+    try {
+      await updateProfileName(nameDraft);
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const iconBtn = "relative flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100";

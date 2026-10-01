@@ -11,9 +11,9 @@ import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AppLogo } from "@/components/app-logo";
 
-type B = { id: string; name: string; is_pinned: boolean; is_archived: boolean };
+type B = { id: string; user_id: string; name: string; is_pinned: boolean; is_archived: boolean };
 
-export function Sidebar({ boards, wip, email }: { boards: B[]; wip: Record<string, { used: number; limit: number }>; email: string }) {
+export function Sidebar({ boards, wip, email, userId }: { boards: B[]; wip: Record<string, { used: number; limit: number }>; email: string; userId: string }) {
   const path = usePathname();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -55,7 +55,7 @@ export function Sidebar({ boards, wip, email }: { boards: B[]; wip: Record<strin
             </>
           )}
         </Link>
-        {!slim && (
+        {!slim && b.user_id === userId && (
           <div className="hidden items-center group-hover:flex max-md:flex">
             <button title={b.is_pinned ? "Unpin" : "Pin"} onClick={() => start(() => togglePin(b.id, !b.is_pinned))} className="p-1 hover:text-indigo-300">
               {b.is_pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
@@ -87,7 +87,7 @@ export function Sidebar({ boards, wip, email }: { boards: B[]; wip: Record<strin
         <div className={`mb-4 flex items-center ${slim ? "flex-col gap-2" : "justify-between px-2"}`}>
           {slim ? <AppLogo className="h-7 w-7" /> : (
             <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-              <AppLogo className="h-6 w-6" /> Kanban Workspace
+              <AppLogo className="h-6 w-6" /> FlowDeck
             </Link>
           )}
           <div className={`flex items-center gap-1 ${slim ? "flex-col" : ""}`}>

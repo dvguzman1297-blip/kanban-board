@@ -10,9 +10,10 @@ import { PinButton } from "@/components/pin-button";
 import { NewBoardButton } from "@/components/new-board-button";
 import { FocusWidget } from "@/components/focus-widget";
 import { PriorityBadge } from "@/components/card-view";
+import { InviteMembersButton } from "@/components/invite-members-button";
 import type { Card, Column } from "@/lib/types";
 
-type Board = { id: string; name: string; is_pinned: boolean; is_archived: boolean; created_at: string };
+type Board = { id: string; name: string; user_id: string; is_pinned: boolean; is_archived: boolean; created_at: string };
 type Act = {
   id: string; board_id: string | null; card_id: string | null; card_title: string | null;
   kind: string; from_column: string | null; to_column: string | null; created_at: string;
@@ -40,11 +41,12 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [{ data: boardsRaw }, { data: colsRaw }, { data: cardsRaw }, { data: actsRaw }] = await Promise.all([
+  const [{ data: boardsRaw }, { data: colsRaw }, { data: cardsRaw }, { data: actsRaw }, { data: profile }] = await Promise.all([
     supabase.from("boards").select("*").order("created_at"),
     supabase.from("columns").select("*").order("order_index"),
     supabase.from("cards").select("*"),
     supabase.from("activity").select("*").order("created_at", { ascending: false }).limit(200),
+    user ? supabase.from("profiles").select("first_name, full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
   const allBoards = (boardsRaw ?? []) as Board[];
@@ -116,8 +118,8 @@ export default async function DashboardPage() {
     }
   };
 
-  const fullName = ((user?.user_metadata?.full_name as string | undefined) ?? "").trim();
-  const first = fullName.split(" ")[0];
+  const fullName = String(user?.user_metadata?.full_name || profile?.full_name || "").trim();
+  const first = String(user?.user_metadata?.first_name || profile?.first_name || fullName.split(/\s+/)[0] || "").trim();
 
   return (
     <div className="h-full overflow-y-auto p-4 md:p-6">
@@ -151,10 +153,10 @@ export default async function DashboardPage() {
                     return (
                       <div key={b.id} className="group relative rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition-colors hover:border-zinc-700 hover:bg-zinc-900">
                         <Link href={`/board/${b.id}`} aria-label={`Open ${b.name}`} className="absolute inset-0 rounded-xl" />
-                        <div className="pointer-events-none relative">
+                        <div className="pointer-events-none relative z-10">
                           <div className="mb-3 flex items-start justify-between gap-2">
                             <h3 className="min-w-0 truncate font-medium">{b.name}</h3>
-                            <PinButton id={b.id} pinned={b.is_pinned} />
+                            {b.user_id === user?.id && <PinButton id={b.id} pinned={b.is_pinned} />}
                           </div>
                           <div className="mb-2 flex h-2 overflow-hidden rounded-full bg-zinc-800">
                             {segs.filter((s) => s.n > 0).map((s) => (
@@ -175,6 +177,11 @@ export default async function DashboardPage() {
                             </span>
                             <span className="text-zinc-500">Updated {timeAgo(last)}</span>
                           </div>
+                          {b.user_id === user?.id && (
+                            <div className="pointer-events-auto mt-3 flex justify-end">
+                              <InviteMembersButton boardId={b.id} boardName={b.name} compact />
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
