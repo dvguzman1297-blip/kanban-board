@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AtSign, Check, Loader2, MailPlus, UserCheck, Bell, X } from "lucide-react";
@@ -13,12 +13,15 @@ import { timeAgo } from "@/lib/time";
 export function useNotifications(userId: string, initial: AppNotification[]) {
   const [items, setItems] = useState(initial);
   const toast = useToast();
+  // The bell and the /notifications page both call this hook. Supabase hands back the SAME channel for a repeated topic,
+  // and adding listeners to an already-subscribed channel throws, so every instance gets its own topic.
+  const instance = useId();
   const toastRef = useRef(toast);
   useEffect(() => { toastRef.current = toast; }, [toast]);
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase.channel(`notifications:${userId}`)
+    const channel = supabase.channel(`notifications:${userId}:${instance}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, (payload) => {
         const event = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
         const row = (event === "DELETE" ? payload.old : payload.new) as AppNotification;
@@ -28,7 +31,7 @@ export function useNotifications(userId: string, initial: AppNotification[]) {
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [userId]);
+  }, [userId, instance]);
 
   const patch = (id: string, change: Partial<AppNotification>) => setItems((cur) => cur.map((n) => (n.id === id ? { ...n, ...change } : n)));
   const markRead = (id: string) => {
