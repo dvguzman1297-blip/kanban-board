@@ -17,7 +17,8 @@ import { createCard, moveCard, updateCard, deleteCard, renameBoard } from "@/app
 import { CardModal } from "@/components/card-modal";
 import { InviteMembersButton } from "@/components/invite-members-button";
 import { CardView } from "@/components/card-view";
-import { ListView, CalendarView, TimelineView } from "@/components/board-views";
+import { ListView, CalendarView } from "@/components/board-views";
+import { TimelineView } from "@/components/timeline-view";
 import { BoardDashboard } from "@/components/board-dashboard";
 import { MembersProvider } from "@/components/members-context";
 import { TagsProvider } from "@/components/tags-context";
@@ -557,7 +558,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
       {view === "list" && <ListView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "calendar" && <CalendarView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "timeline" && <TimelineView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId}
-        onDateChange={(id, start_date, due_date) => saveCard(id, { start_date, due_date })} />}
+        onChange={(id, patch) => saveCard(id, patch)} />}
 
       {view === "kanban" && (
         <DndContext id={`board-${board.id}`} sensors={sensors} collisionDetection={closestCorners}

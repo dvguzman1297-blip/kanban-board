@@ -115,8 +115,16 @@ export async function moveCard(id: string, column_id: string, order_index: numbe
 }
 export async function updateCard(id: string, patch: Record<string, unknown>) {
   const supabase = await createClient();
-  const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "subtasks", "color", "assignee_id"]); // assignee membership is enforced by a DB trigger
+  const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "start_time", "due_time", "subtasks", "color", "assignee_id"]); // assignee membership is enforced by a DB trigger
   const safePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
+  for (const key of ["due_date", "start_date"]) {
+    const v = safePatch[key];
+    if (v != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw new Error("Invalid date.");
+  }
+  for (const key of ["start_time", "due_time"]) {
+    const v = safePatch[key];
+    if (v != null && !/^([01]\d|2[0-3]):[0-5]\d(:00)?$|^24:00(:00)?$/.test(String(v))) throw new Error("Invalid time.");
+  }
   if (!Object.keys(safePatch).length) return;
   // Database rules (e.g. all subtasks done -> Done) may change more than we sent, so hand the row back.
   const { data, error } = await supabase.from("cards").update(safePatch).eq("id", id)

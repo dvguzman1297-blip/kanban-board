@@ -27,6 +27,9 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
   const [priority, setPriority] = useState<Card["priority"]>(card.priority);
   const [energy, setEnergy] = useState<Card["energy_level"]>(card.energy_level);
   const [due, setDue] = useState(card.due_date ?? "");
+  const [start, setStart] = useState(card.start_date ?? "");
+  const [startTime, setStartTime] = useState(card.start_time?.slice(0, 5) ?? ""); // "" = whole days
+  const [dueTime, setDueTime] = useState(card.due_time?.slice(0, 5) ?? "");
   const members = useMembers();
   const [templateMsg, setTemplateMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const saveTemplate = async () => {
@@ -75,7 +78,9 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
     const subs = newSub.trim() ? [...subtasks, { id: crypto.randomUUID(), title: newSub.trim(), done: false }] : subtasks;
     onSave({
       title: title.trim(), description: description.trim() || null, priority,
-      energy_level: energy, due_date: due || null, subtasks: subs, color, assignee_id: assignee || null,
+      energy_level: energy, due_date: due || null, start_date: start || null,
+      // The Timeline's Day view places bars by these; both empty = the card covers whole days.
+      start_time: startTime || null, due_time: dueTime || null, subtasks: subs, color, assignee_id: assignee || null,
     });
     if (tagIds.length !== initialTagIds.length || tagIds.some((id) => !initialTagIds.includes(id))) onSaveTags(tagIds);
     onClose();
@@ -150,9 +155,23 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
             </select>
           </div>
 
-          <div>
-            <label className={label}>Due date</label>
-            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={field} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Start date</label>
+              <input type="date" value={start} max={due || undefined} onChange={(e) => setStart(e.target.value)} className={field} />
+            </div>
+            <div>
+              <label className={label}>Due date</label>
+              <input type="date" value={due} min={start || undefined} onChange={(e) => setDue(e.target.value)} className={field} />
+            </div>
+            <div>
+              <label className={label}>Start time <span className="text-zinc-600">(optional)</span></label>
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={field} />
+            </div>
+            <div>
+              <label className={label}>End time <span className="text-zinc-600">(optional)</span></label>
+              <input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} className={field} />
+            </div>
           </div>
 
           <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
