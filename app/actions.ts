@@ -105,7 +105,7 @@ export async function moveCard(id: string, column_id: string, order_index: numbe
 }
 export async function updateCard(id: string, patch: Record<string, unknown>) {
   const supabase = await createClient();
-  const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "subtasks", "color"]);
+  const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "subtasks", "color", "assignee_id"]); // assignee membership is enforced by a DB trigger
   const safePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
   if (!Object.keys(safePatch).length) return;
   const { error } = await supabase.from("cards").update(safePatch).eq("id", id);

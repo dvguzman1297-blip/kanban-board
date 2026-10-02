@@ -6,6 +6,8 @@ export type Card = {
   due_date: string | null; start_date?: string | null; created_at?: string; subtasks: Subtask[]; order_index: number;
   color?: string | null; // palette key; null/undefined = use the column's colour
   completed_at?: string | null; // set when the card enters the Done column
+  user_id?: string; // creator
+  assignee_id?: string | null; // board member the card is assigned to
 };
 
 export type Attachment = {
@@ -18,4 +20,8 @@ export type CardComment = {
   id: string; card_id: string; user_id: string; content: string; created_at: string; updated_at: string;
   author: { id: string; first_name: string | null; full_name: string | null };
   relativeLabel: string;
+};
+
+export type Member = {
+  id: string; first_name: string | null; full_name: string | null; display_name: string | null; avatar_url: string | null;
 };

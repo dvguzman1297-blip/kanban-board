@@ -4,6 +4,8 @@ import { Calendar, CheckSquare, FileText, Flag, GripVertical, Paperclip, PencilL
 import { useFocus } from "@/components/focus-drawer";
 import { PALETTE, type ColorKey } from "@/lib/colors";
 import { isImage } from "@/lib/attachments";
+import { useMembers } from "@/components/members-context";
+import { memberName } from "@/lib/board-stats";
 import type { Attachment, Card } from "@/lib/types";
 
 // Priority = slate -> indigo -> orange -> red.  Energy = green -> yellow -> violet.  (No overlap, so they never blend.)
@@ -39,6 +41,7 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
   onEdit?: () => void; onDelete?: () => void; onRename?: (title: string) => void;
 }) {
   const { startFocus } = useFocus();
+  const assignee = useMembers().find((m) => m.id === card.assignee_id);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(card.title);
   const cancel = useRef(false);
@@ -89,6 +92,12 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
           {card.due_date && <span className="flex items-center gap-1 text-zinc-500"><Calendar className="h-3 w-3" />{card.due_date}</span>}
           {subs.length > 0 && <span title="Subtasks done" className="flex items-center gap-1 text-zinc-500"><CheckSquare className="h-3 w-3" />{done}/{subs.length}</span>}
           {attachments.length > 0 && <span className="flex items-center gap-0.5 text-zinc-500"><Paperclip className="h-3 w-3" />{attachments.length}</span>}
+          {assignee && (
+            <span title={`Assigned to ${memberName(assignee)}`} className="ml-auto flex h-5 w-5 items-center justify-center overflow-hidden rounded-full bg-indigo-600 text-[10px] font-semibold text-white">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {assignee.avatar_url ? <img src={assignee.avatar_url} alt="" className="h-full w-full object-cover" /> : memberName(assignee)[0]?.toUpperCase()}
+            </span>
+          )}
         </div>
 
         {subs.length > 0 && (

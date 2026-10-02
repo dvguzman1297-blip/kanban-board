@@ -9,20 +9,22 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Search, AlertTriangle, Pencil, ChevronsLeft, ChevronsRight, ChevronDown, TrendingUp, Ban, Clock,
-  Columns3, List, CalendarDays, CalendarRange, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
+  Columns3, List, CalendarDays, CalendarRange, LayoutDashboard, Check, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
 } from "lucide-react";
 import { createCard, moveCard, updateCard, deleteCard, renameBoard } from "@/app/actions";
 import { CardModal } from "@/components/card-modal";
 import { InviteMembersButton } from "@/components/invite-members-button";
 import { CardView } from "@/components/card-view";
 import { ListView, CalendarView, TimelineView } from "@/components/board-views";
+import { BoardDashboard } from "@/components/board-dashboard";
+import { MembersProvider } from "@/components/members-context";
 import { createClient } from "@/lib/supabase/client";
 import { BUCKET, MAX_BYTES, SIGNED_URL_TTL, safeName } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, columnColor, effectiveColor, type ColorKey } from "@/lib/colors";
 import { defaultDueDate, isBlockedName, isDoneName, toISO } from "@/lib/board-utils";
-import type { Attachment, Card, CardComment, Column } from "@/lib/types";
+import type { Attachment, Card, CardComment, Column, Member } from "@/lib/types";
 
-type View = "kanban" | "list" | "calendar" | "timeline";
+type View = "kanban" | "list" | "calendar" | "timeline" | "dashboard";
 type GroupBy = "none" | "priority" | "energy" | "color";
 type CardAttrs = Partial<Pick<Card, "priority" | "energy_level" | "color">>;
 
@@ -49,9 +51,9 @@ const wipTitle = (c: Column, n: number) =>
   : n > c.wip_limit ? `WIP limit exceeded: ${n} cards, limit is ${c.wip_limit}`
   : n === c.wip_limit ? `At WIP limit (${c.wip_limit}) — finish something before pulling more` : `${n} of ${c.wip_limit} slots used`;
 
-export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
+export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, members, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
   board: { id: string; name: string; description: string | null };
-  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[];
+  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[]; members: Member[];
   currentUser: { id: string; name: string }; canInvite: boolean; canEdit?: boolean; canAdmin?: boolean; initialOpenCardId?: string | null;
 }) {
   const [cards, setCards] = useState<Card[]>(initialCards);
@@ -305,9 +307,11 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     ["list", "List", <List key="l" className="h-4 w-4" />],
     ["calendar", "Calendar", <CalendarDays key="c" className="h-4 w-4" />],
     ["timeline", "Timeline / Gantt", <CalendarRange key="t" className="h-4 w-4" />],
+    ["dashboard", "Dashboard", <LayoutDashboard key="d" className="h-4 w-4" />],
   ];
 
   return (
+    <MembersProvider value={members}>
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3 md:px-6 md:py-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -344,15 +348,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
             )}
           </div>
 
-          {/* View switcher */}
-          <div className="ml-auto flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
-            {canInvite && <div className="mr-1"><InviteMembersButton boardId={board.id} boardName={name} /></div>}
-            {views.map(([v, label, icon]) => (
-              <button key={v} onClick={() => setView(v)} title={`${label} view`} aria-label={`${label} view`}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm ${view === v ? "bg-indigo-600 text-white" : "text-zinc-400 hover:text-zinc-100"}`}>
-                {icon}<span className="hidden sm:inline">{label}</span>
-              </button>
-            ))}
+          {/* Invite + view picker */}
+          <div className="ml-auto flex items-center gap-2">
+            {canInvite && <InviteMembersButton boardId={board.id} boardName={name} />}
+            <ViewMenu views={views} value={view} onChange={setView} />
           </div>
         </div>
 
@@ -388,6 +387,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
         </div>
       </header>
 
+      {view === "dashboard" && (
+        <BoardDashboard cards={visible} columns={initialColumns} members={members} today={toISO(new Date())}
+          commentAuthors={initialComments.filter((c) => cards.some((k) => k.id === c.card_id)).map((c) => c.user_id)} />
+      )}
       {view === "list" && <ListView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "calendar" && <CalendarView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "timeline" && <TimelineView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId}
@@ -469,6 +472,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
         )}
       </AnimatePresence>
     </div>
+    </MembersProvider>
   );
 }
 
@@ -624,5 +628,38 @@ function SortableCard({ card, colorKey, attachments, previews, canEdit, onEdit, 
           onDelete={() => confirm("Delete this card?") && onDelete(card.id)} />
       </div>
     </motion.div>
+  );
+}
+
+/* ---------- view picker (dropdown) ---------- */
+function ViewMenu({ views, value, onChange }: { views: [View, string, React.ReactNode][]; value: View; onChange: (v: View) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const current = views.find(([v]) => v === value)!;
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
+        className="flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-sm hover:border-zinc-700">
+        {current[2]}<span>{current[1]}</span><ChevronDown className={`h-4 w-4 text-zinc-500 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-10 z-40 w-52 rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl">
+          {views.map(([v, label, icon]) => (
+            <button key={v} role="menuitemradio" aria-checked={v === value} onClick={() => { onChange(v); setOpen(false); }}
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-800 ${v === value ? "text-indigo-300" : "text-zinc-300"}`}>
+              {icon}<span className="flex-1">{label}</span>{v === value && <Check className="h-4 w-4" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

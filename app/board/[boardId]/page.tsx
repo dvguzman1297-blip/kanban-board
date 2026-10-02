@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BoardClient } from "@/components/board-client";
 import { timeAgo } from "@/lib/time";
 import { BUCKET, SIGNED_URL_TTL } from "@/lib/attachments";
-import type { Attachment, CardComment } from "@/lib/types";
+import type { Attachment, CardComment, Member } from "@/lib/types";
 
 export default async function BoardPage({ params, searchParams }: {
   params: Promise<{ boardId: string }>; searchParams: Promise<{ card?: string }>;
@@ -57,13 +57,21 @@ export default async function BoardPage({ params, searchParams }: {
       relativeLabel: timeAgo(comment.created_at),
     };
   });
+  const { data: memberRows } = await supabase.from("board_members").select("user_id").eq("board_id", board.id).eq("status", "accepted");
+  const memberIds = [...new Set([board.user_id as string, ...(memberRows ?? []).map((m) => m.user_id as string)])];
+  const { data: memberProfiles } = await supabase.from("profiles").select("id, first_name, full_name, display_name, avatar_url").in("id", memberIds);
+  const profileMap = new Map((memberProfiles ?? []).map((p) => [p.id as string, p]));
+  const members: Member[] = memberIds.map((id) => ({
+    id, first_name: profileMap.get(id)?.first_name ?? null, full_name: profileMap.get(id)?.full_name ?? null,
+    display_name: profileMap.get(id)?.display_name ?? null, avatar_url: profileMap.get(id)?.avatar_url ?? null,
+  }));
   const fullName = String(user?.user_metadata?.full_name || currentProfile?.full_name || "").trim();
   const displayName = String(user?.user_metadata?.first_name || currentProfile?.first_name || fullName || "");
   const currentUser = { id: user?.id ?? "", name: displayName.trim().split(/\s+/)[0] || user?.email?.split("@")[0] || "You" };
 
   return (
     <BoardClient key={board.id} board={board} initialColumns={columns ?? []}
-      initialCards={cards ?? []} initialAttachments={attachments} initialComments={initialComments}
+      initialCards={cards ?? []} initialAttachments={attachments} initialComments={initialComments} members={members}
       currentUser={currentUser} canInvite={board.user_id === user?.id} canEdit={canEdit} canAdmin={canAdmin} initialOpenCardId={openCardId ?? null} />
   );
 }

@@ -7,6 +7,8 @@ import type { CardComment } from "@/lib/types";
 import { CardComments } from "@/components/card-comments";
 import { formatSize, isImage } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, type ColorKey } from "@/lib/colors";
+import { useMembers } from "@/components/members-context";
+import { memberName } from "@/lib/board-stats";
 
 const field = "w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-indigo-500";
 const label = "mb-1 block text-xs font-medium text-zinc-500";
@@ -21,6 +23,8 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
   const [priority, setPriority] = useState<Card["priority"]>(card.priority);
   const [energy, setEnergy] = useState<Card["energy_level"]>(card.energy_level);
   const [due, setDue] = useState(card.due_date ?? "");
+  const members = useMembers();
+  const [assignee, setAssignee] = useState(card.assignee_id ?? "");
   const [color, setColor] = useState<string | null>(card.color ?? null); // null = Auto (column colour)
   const [subtasks, setSubtasks] = useState<Subtask[]>(card.subtasks ?? []);
   const [newSub, setNewSub] = useState("");
@@ -57,7 +61,7 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
     const subs = newSub.trim() ? [...subtasks, { id: crypto.randomUUID(), title: newSub.trim(), done: false }] : subtasks;
     onSave({
       title: title.trim(), description: description.trim() || null, priority,
-      energy_level: energy, due_date: due || null, subtasks: subs, color,
+      energy_level: energy, due_date: due || null, subtasks: subs, color, assignee_id: assignee || null,
     });
     onClose();
   };
@@ -116,6 +120,14 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
                 {["low", "medium", "high"].map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className={label}>Assignee</label>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={field}>
+              <option value="">Unassigned</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{memberName(m)}</option>)}
+            </select>
           </div>
 
           <div>

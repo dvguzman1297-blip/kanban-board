@@ -48,3 +48,36 @@ describe("addWorkingDays", () => {
     expect(addWorkingDays(new Date(2026, 9, 11), 3)).toBe("2026-10-14"); // Sun -> Wed
   });
 });
+
+import { computeBoardStats } from "../board-stats";
+
+describe("computeBoardStats", () => {
+  const columns = [
+    { id: "c1", board_id: "b", name: "Backlog", order_index: 1, wip_limit: null },
+    { id: "c2", board_id: "b", name: "Done", order_index: 2, wip_limit: null },
+  ];
+  const base = { board_id: "b", title: "t", description: null, priority: "medium" as const, energy_level: "medium" as const, subtasks: [], order_index: 1 };
+  const cards = [
+    { ...base, id: "1", column_id: "c1", due_date: "2026-10-01", user_id: "u1", assignee_id: "u1" },
+    { ...base, id: "2", column_id: "c2", due_date: "2026-10-01", user_id: "u1", assignee_id: "u2" },
+    { ...base, id: "3", column_id: "c1", due_date: null, user_id: "u2", assignee_id: null },
+  ];
+  const members = [
+    { id: "u1", first_name: "Ann", full_name: null, display_name: null, avatar_url: null },
+    { id: "u2", first_name: "Bo", full_name: null, display_name: "Bobby", avatar_url: null },
+  ];
+  const s = computeBoardStats(cards, columns, members, ["u2", "u2", "u1"], "2026-10-02");
+
+  it("counts lists, due buckets and headline numbers", () => {
+    expect(s.perList.map((x) => x.count)).toEqual([2, 1]);
+    expect(Object.fromEntries(s.perDue.map((x) => [x.key, x.count]))).toMatchObject({ overdue: 1, none: 1, done: 1 });
+    expect(s).toMatchObject({ total: 3, completed: 1, overdue: 1, unassigned: 1 });
+  });
+  it("breaks contribution down per member", () => {
+    const ann = s.perMember.find((m) => m.id === "u1")!;
+    const bo = s.perMember.find((m) => m.id === "u2")!;
+    expect(ann).toMatchObject({ assigned: 1, open: 1, overdue: 1, created: 2, comments: 1 });
+    expect(bo).toMatchObject({ name: "Bobby", assigned: 1, completed: 1, created: 1, comments: 2 });
+    expect(s.perMember.at(-1)!.name).toBe("Unassigned");
+  });
+});
