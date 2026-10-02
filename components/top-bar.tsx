@@ -1,13 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Bell, Plus, Search, Settings } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { QuickTaskModal } from "@/components/quick-task-modal";
-import { updateProfileName } from "@/app/actions";
 
 type Board = { id: string; name: string; is_archived: boolean };
 export type Alert = { text: string; href: string; tone: "rose" | "amber" };
@@ -35,12 +33,9 @@ function Popover({ button, children }: { button: (open: boolean, toggle: () => v
   );
 }
 
-export function TopBar({ boards, alerts, email, displayName }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string }) {
-  const router = useRouter();
+export function TopBar({ boards, alerts, email, displayName, avatarUrl }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string; avatarUrl: string | null }) {
   const [palette, setPalette] = useState(false);
   const [quick, setQuick] = useState(false);
-  const [nameDraft, setNameDraft] = useState(displayName);
-  const [saving, setSaving] = useState(false);
   const active = boards.filter((b) => !b.is_archived);
   const initial = (displayName || email || "?").trim()[0]?.toUpperCase() ?? "?";
 
@@ -52,16 +47,6 @@ export function TopBar({ boards, alerts, email, displayName }: { boards: Board[]
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
-
-  const saveName = async () => {
-    setSaving(true);
-    try {
-      await updateProfileName(nameDraft);
-      router.refresh();
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const iconBtn = "relative flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100";
 
@@ -119,19 +104,18 @@ export function TopBar({ boards, alerts, email, displayName }: { boards: Board[]
 
           <Popover button={(_o, toggle) => (
             <button onClick={toggle} title="Account" aria-label="Account"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">{initial}</button>
+              className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-indigo-600 text-sm font-semibold text-white">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : initial}
+            </button>
           )}>
-            {() => (
-              <div className="space-y-3 p-2 text-sm">
-                <p className="truncate text-xs text-zinc-500">{email}</p>
-                <div>
-                  <label className="mb-1 block text-xs text-zinc-500">Display name</label>
-                  <div className="flex gap-2">
-                    <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} maxLength={40} placeholder="Your name"
-                      className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-950 px-2 text-sm outline-none focus:border-indigo-500" />
-                    <button onClick={saveName} disabled={saving} className="rounded-lg bg-indigo-600 px-3 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-60">Save</button>
-                  </div>
+            {(close) => (
+              <div className="space-y-2 p-2 text-sm">
+                <div className="px-1">
+                  {displayName && <p className="truncate font-medium">{displayName}</p>}
+                  <p className="truncate text-xs text-zinc-500">{email}</p>
                 </div>
+                <Link href="/settings" onClick={close} className="block rounded-lg px-3 py-1.5 text-zinc-300 hover:bg-zinc-800">Account settings</Link>
                 <button onClick={async () => { await createClient().auth.signOut(); location.href = "/auth/login"; }}
                   className="w-full rounded-lg border border-zinc-800 py-1.5 text-zinc-300 hover:bg-zinc-800">Sign out</button>
               </div>

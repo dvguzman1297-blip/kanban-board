@@ -19,7 +19,7 @@ import { ListView, CalendarView, TimelineView } from "@/components/board-views";
 import { createClient } from "@/lib/supabase/client";
 import { BUCKET, MAX_BYTES, SIGNED_URL_TTL, safeName } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, columnColor, effectiveColor, type ColorKey } from "@/lib/colors";
-import { isBlockedName, isDoneName, toISO } from "@/lib/board-utils";
+import { defaultDueDate, isBlockedName, isDoneName, toISO } from "@/lib/board-utils";
 import type { Attachment, Card, CardComment, Column } from "@/lib/types";
 
 type View = "kanban" | "list" | "calendar" | "timeline";
@@ -236,7 +236,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   const addCard = async (column_id: string, title: string, extra: CardAttrs = {}) => {
     const list = cards.filter((c) => c.column_id === column_id);
     const order_index = Math.max(0, ...list.map((c) => c.order_index)) + 1000;
-    const created = await createCard({ column_id, board_id: board.id, title, order_index, ...extra });
+    const created = await createCard({ column_id, board_id: board.id, title, order_index, due_date: defaultDueDate(), ...extra });
     setCards((p) => [...p, created as Card]);
   };
 

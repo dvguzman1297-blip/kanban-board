@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { quickCreateCard } from "@/app/actions";
 import { createClient } from "@/lib/supabase/client";
+import { defaultDueDate } from "@/lib/board-utils";
 
 type Board = { id: string; name: string };
 type Col = { id: string; name: string };
@@ -19,7 +20,7 @@ export function QuickTaskModal({ boards, onClose }: { boards: Board[]; onClose: 
   const [columnId, setColumnId] = useState("");
   const [priority, setPriority] = useState("medium");
   const [energy, setEnergy] = useState("medium");
-  const [due, setDue] = useState("");
+  const [due, setDue] = useState(() => defaultDueDate());
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -98,7 +99,7 @@ export function QuickTaskModal({ boards, onClose }: { boards: Board[]; onClose: 
             </div>
           </div>
           <div>
-            <label className={label}>Due date (optional)</label>
+            <label className={label}>Due date (default: 3 working days)</label>
             <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={field} />
           </div>
         </div>

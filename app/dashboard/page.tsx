@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   ArrowRight, Ban, CheckCircle2, Clock, Flag, Gauge, Inbox, LayoutDashboard, ListTodo, Plus, TrendingUp, Zap,
 } from "lucide-react";
@@ -37,7 +38,8 @@ function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label:
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
+  const { view } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -46,10 +48,15 @@ export default async function DashboardPage() {
     supabase.from("columns").select("*").order("order_index"),
     supabase.from("cards").select("*"),
     supabase.from("activity").select("*").order("created_at", { ascending: false }).limit(200),
-    user ? supabase.from("profiles").select("first_name, full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+    user ? supabase.from("profiles").select("first_name, full_name, default_board_id").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
   const allBoards = (boardsRaw ?? []) as Board[];
+
+  // Honour the default board from Settings; "Home" in the sidebar links here with ?view=all to bypass it.
+  const preferred = profile?.default_board_id as string | null | undefined;
+  if (view !== "all" && preferred && allBoards.some((b) => b.id === preferred && !b.is_archived)) redirect(`/board/${preferred}`);
+
   const boards = allBoards.filter((b) => !b.is_archived)
     .sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || a.created_at.localeCompare(b.created_at));
   const boardById = new Map(allBoards.map((b) => [b.id, b]));

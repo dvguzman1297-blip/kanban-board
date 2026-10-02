@@ -71,11 +71,12 @@ export async function deleteBoard(id: string) {
   redirect("/");
 }
 
-export async function createCard(input: { column_id: string; board_id: string; title: string; order_index: number } & CardAttrs) {
+export async function createCard(input: { column_id: string; board_id: string; title: string; order_index: number; due_date?: string | null } & CardAttrs) {
   const supabase = await createClient();
   const { column_id, board_id, title, order_index } = input;
+  const due_date = input.due_date && /^\d{4}-\d{2}-\d{2}$/.test(input.due_date) ? input.due_date : null;
   const { data, error } = await supabase.from("cards")
-    .insert({ column_id, board_id, title, order_index, ...pickAttrs(input) }).select().single();
+    .insert({ column_id, board_id, title, order_index, due_date, ...pickAttrs(input) }).select().single();
   if (error) throw error;
   return data;
 }

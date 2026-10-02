@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
 import { ThemeInitializer } from "@/components/theme-initializer";
+import { isThemePref } from "@/lib/theme";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
 
 export const metadata: Metadata = { title: "FlowDeck", description: "FlowDeck collaborative workspace" };
@@ -29,7 +30,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     supabase.from("boards").select("id, user_id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
     supabase.from("columns").select("id, board_id, name, wip_limit"),
     supabase.from("cards").select("column_id, board_id, due_date"),
-    supabase.from("profiles").select("first_name, full_name").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("first_name, full_name, display_name, avatar_url, theme").eq("id", user.id).maybeSingle(),
   ]);
 
   const boardList = boards ?? [];
@@ -56,23 +57,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const today = toISO(new Date());
   const overdue = cardList.filter((c) => c.due_date && c.due_date < today && !doneIds.has(c.column_id)).length;
   const blocked = cardList.filter((c) => blockedIds.has(c.column_id)).length;
-  if (blocked > 0) alerts.unshift({ tone: "rose", href: "/dashboard", text: `${blocked} blocked card${blocked === 1 ? "" : "s"} need attention` });
-  if (overdue > 0) alerts.unshift({ tone: "amber", href: "/dashboard", text: `${overdue} overdue card${overdue === 1 ? "" : "s"}` });
+  if (blocked > 0) alerts.unshift({ tone: "rose", href: "/dashboard?view=all", text: `${blocked} blocked card${blocked === 1 ? "" : "s"} need attention` });
+  if (overdue > 0) alerts.unshift({ tone: "amber", href: "/dashboard?view=all", text: `${overdue} overdue card${overdue === 1 ? "" : "s"}` });
 
   const metadataFirst = String(user.user_metadata?.first_name ?? "").trim();
   const profileFirst = String(profile?.first_name ?? "").trim();
   const fullName = String(user.user_metadata?.full_name || profile?.full_name || "").trim();
-  const displayName = metadataFirst || profileFirst || fullName;
+  const displayName = String(profile?.display_name ?? "").trim() || metadataFirst || profileFirst || fullName;
+  const rawTheme = profile?.theme;
+  const theme = isThemePref(rawTheme) ? rawTheme : undefined;
 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
-        <ThemeInitializer />
+        <ThemeInitializer serverTheme={theme} />
         <FocusProvider>
           <div className="flex h-dvh overflow-hidden">
             <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} userId={user.id} />
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} />
+              <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} avatarUrl={profile?.avatar_url ?? null} />
               <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
             </div>
           </div>

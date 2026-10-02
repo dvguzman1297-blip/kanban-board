@@ -121,7 +121,7 @@ export function Sidebar({ boards, wip, email, userId }: { boards: B[]; wip: Reco
         )}
 
         <nav className={`flex-1 space-y-4 overflow-y-auto ${pending ? "opacity-70" : ""}`}>
-          <Link href="/dashboard" title="Home"
+          <Link href="/dashboard?view=all" title="Home"
             className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${path === "/dashboard" ? "bg-indigo-500/15 text-indigo-200" : "text-zinc-400 hover:bg-zinc-800/70"} ${slim ? "justify-center" : ""}`}>
             <Home className="h-4 w-4 shrink-0" />{!slim && "Home"}
           </Link>
