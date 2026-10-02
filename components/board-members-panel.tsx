@@ -1,4 +1,5 @@
 "use client";
+import { ListRowsSkeleton } from "@/components/skeletons";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
@@ -43,11 +44,11 @@ export function BoardMembersPanel({ boardId, refreshKey }: { boardId: string; re
       <h3 className="mb-2 text-sm font-semibold">Members</h3>
       {error && <p role="alert" className="mb-2 text-sm text-rose-400">{error}</p>}
       {members === null ? (
-        <p className="text-sm text-zinc-500">Loading…</p>
+        <ListRowsSkeleton rows={2} />
       ) : members.length === 0 ? (
         <p className="text-sm text-zinc-500">No one has joined this board yet.</p>
       ) : (
-        <ul className="divide-y divide-zinc-800">
+        <ul className="fd-fade-in divide-y divide-zinc-800">
           {members.map((m) => (
             <li key={m.userId} className="flex items-center gap-2 py-2">
               {m.avatarUrl

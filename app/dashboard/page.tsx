@@ -129,7 +129,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const first = String(user?.user_metadata?.first_name || profile?.first_name || fullName.split(/\s+/)[0] || "").trim();
 
   return (
-    <div className="h-full overflow-y-auto p-4 md:p-6">
+    <div className="fd-fade-in h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
         <section>
           <h1 className="mb-4 text-xl font-semibold md:text-2xl">Welcome back{first ? `, ${first}` : ""}! 👋</h1>

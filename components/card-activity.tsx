@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ListRowsSkeleton } from "@/components/skeletons";
 import { getCardActivity } from "@/app/card-extras-actions";
 import type { CardEventItem } from "@/lib/types";
 
@@ -17,10 +18,10 @@ export function CardActivity({ cardId }: { cardId: string }) {
     <section className="mt-4 border-t border-zinc-800 pt-4">
       <h3 className="mb-3 text-sm font-medium">Activity</h3>
       {failed ? <p className="text-xs text-zinc-600">Activity is unavailable right now.</p>
-        : items === null ? <p className="text-xs text-zinc-600">Loading…</p>
+        : items === null ? <ListRowsSkeleton rows={3} />
         : items.length === 0 ? <p className="text-xs text-zinc-600">No activity recorded yet.</p>
         : (
-          <ol className="space-y-2.5">
+          <ol className="fd-fade-in space-y-2.5">
             {items.map((e) => (
               <li key={e.id} className="flex items-start gap-2.5 text-xs">
                 {e.actor.avatarUrl

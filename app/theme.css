@@ -32,3 +32,11 @@ html.light {
   --color-violet-300: oklch(0.491 0.27 292.581);
   --color-emerald-300: oklch(0.508 0.118 165.612);
 }
+
+/* Fades loaded content in over its skeleton so the swap doesn't flash. */
+@keyframes fd-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.fd-fade-in { animation: fd-fade-in 220ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .fd-fade-in { animation: none; }
+  .animate-pulse { animation: none; }
+}

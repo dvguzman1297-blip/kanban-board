@@ -458,7 +458,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     <MembersProvider value={members}>
     <TagsProvider value={{ tags, byCard: cardTags }}>
     <BoardUiProvider value={{ focusedId, selectedIds, selectMode, renameId, toggleSelect, clearRename: () => setRenameId(null), templates: allTemplates, addFromTemplate, removeTemplate, canEdit }}>
-    <div className="flex h-full flex-col">
+    <div className="fd-fade-in flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3 md:px-6 md:py-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="min-w-0">
