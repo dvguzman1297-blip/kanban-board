@@ -3,6 +3,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { UserPlus, X } from "lucide-react";
 import { sendBoardInvite } from "@/app/actions";
+import { BoardMembersPanel } from "@/components/board-members-panel";
 
 export function InviteMembersButton({ boardId, boardName, compact = false }: {
   boardId: string; boardName: string; compact?: boolean;
@@ -13,6 +14,7 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [invitesSent, setInvitesSent] = useState(0); // bumps to refresh the member list
 
   const close = () => { setOpen(false); setError(""); setSent(false); setEmail(""); };
   const submit = async (event: React.FormEvent) => {
@@ -22,6 +24,7 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
       const result = await sendBoardInvite(boardId, email, role);
       if ("error" in result) { setError(result.error ?? "Could not send invitation."); return; }
       setSent(true);
+      setInvitesSent((n) => n + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not send invitation.");
     } finally {
@@ -37,9 +40,9 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
       </button>
       {open && createPortal(
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 p-4" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-          <section role="dialog" aria-modal="true" aria-labelledby="invite-title" className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
+          <section role="dialog" aria-modal="true" aria-labelledby="invite-title" className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 id="invite-title" className="min-w-0 truncate text-base font-semibold">Invite to {boardName}</h2>
+              <h2 id="invite-title" className="min-w-0 truncate text-base font-semibold">Members of {boardName}</h2>
               <button onClick={close} aria-label="Close invitation dialog" className="rounded p-1 text-zinc-500 hover:text-white"><X className="h-5 w-5" /></button>
             </div>
             {sent ? (
@@ -71,6 +74,7 @@ export function InviteMembersButton({ boardId, boardName, compact = false }: {
                 </div>
               </form>
             )}
+            <BoardMembersPanel boardId={boardId} refreshKey={invitesSent} />
           </section>
         </div>
       , document.body)}
