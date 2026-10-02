@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Pencil, Send, Trash2, X } from "lucide-react";
+import { Pencil, Send, SmilePlus, Trash2, X } from "lucide-react";
 import { createCardComment, deleteCardComment, updateCardComment } from "@/app/actions";
+import { getReactions, toggleReaction } from "@/app/card-extras-actions";
 import { createClient } from "@/lib/supabase/client";
+import { REACTION_EMOJIS, type ReactionSummary } from "@/lib/types";
 import { timeAgo } from "@/lib/time";
 
 export type CommentItem = {
@@ -20,6 +22,32 @@ export function CardComments({ cardId, initialComments, currentUser }: {
   const [editDraft, setEditDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [reactions, setReactions] = useState<Record<string, ReactionSummary[]>>({});
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const idsKey = comments.map((c) => c.id).join(",");
+
+  useEffect(() => {
+    let live = true;
+    if (idsKey) getReactions(idsKey.split(",")).then((r) => { if (live) setReactions(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [idsKey]);
+
+  // Optimistic toggle: flip locally, then reconcile with the server (revert on failure).
+  const react = async (commentId: string, emoji: string) => {
+    setPickerFor(null);
+    const snapshot = reactions;
+    setReactions((all) => {
+      const list = [...(all[commentId] ?? [])];
+      const i = list.findIndex((r) => r.emoji === emoji);
+      if (i === -1) list.push({ emoji, count: 1, mine: true });
+      else if (list[i].mine) { if (list[i].count <= 1) list.splice(i, 1); else list[i] = { ...list[i], count: list[i].count - 1, mine: false }; }
+      else list[i] = { ...list[i], count: list[i].count + 1, mine: true };
+      const order = REACTION_EMOJIS as readonly string[];
+      return { ...all, [commentId]: list.sort((a, b) => order.indexOf(a.emoji) - order.indexOf(b.emoji)) };
+    });
+    const res = await toggleReaction(commentId, emoji);
+    if (!res.ok) { setReactions(snapshot); setError(res.error); }
+  };
 
   useEffect(() => {
     const supabase = createClient();
@@ -123,6 +151,29 @@ export function CardComments({ cardId, initialComments, currentUser }: {
                     </div>
                   </div>
                 ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-300">{comment.content}</p>}
+                {editingId !== comment.id && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {(reactions[comment.id] ?? []).map((r) => (
+                      <button key={r.emoji} type="button" onClick={() => react(comment.id, r.emoji)} aria-pressed={r.mine}
+                        aria-label={`${r.emoji} ${r.count} ${r.count === 1 ? "reaction" : "reactions"}${r.mine ? ", including yours" : ""}`}
+                        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${r.mine ? "border-indigo-500 bg-indigo-500/20 text-indigo-200" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"}`}>
+                        <span aria-hidden>{r.emoji}</span><span className="tabular-nums">{r.count}</span>
+                      </button>
+                    ))}
+                    <div className="relative">
+                      <button type="button" onClick={() => setPickerFor((p) => (p === comment.id ? null : comment.id))} aria-label="Add reaction" aria-expanded={pickerFor === comment.id}
+                        className="flex h-6 w-6 items-center justify-center rounded-full border border-transparent text-zinc-600 hover:border-zinc-700 hover:text-zinc-300"><SmilePlus className="h-3.5 w-3.5" /></button>
+                      {pickerFor === comment.id && (
+                        <div role="menu" className="absolute left-0 top-7 z-10 flex gap-0.5 rounded-full border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
+                          {REACTION_EMOJIS.map((emoji) => (
+                            <button key={emoji} role="menuitem" type="button" onClick={() => react(comment.id, emoji)} aria-label={`React with ${emoji}`}
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-base hover:bg-zinc-800">{emoji}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {own && editingId !== comment.id && (
                   <div className="mt-1 flex gap-2">
                     <button onClick={() => { setEditingId(comment.id); setEditDraft(comment.content); }} title="Edit comment" aria-label="Edit comment" className="text-zinc-600 hover:text-zinc-300"><Pencil className="h-3 w-3" /></button>

@@ -63,7 +63,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const activeIds = new Set(boards.map((b) => b.id));
   const columns = ((colsRaw ?? []) as Column[]).filter((c) => activeIds.has(c.board_id));
   const colById = new Map(columns.map((c) => [c.id, c]));
-  const cards = ((cardsRaw ?? []) as Card[]).filter((c) => colById.has(c.column_id));
+  const cards = ((cardsRaw ?? []) as Card[]).filter((c) => colById.has(c.column_id) && !c.archived_at);
   const acts = (actsRaw ?? []) as Act[]; // empty until migration 005 has been run
 
   const today = toISO(new Date());

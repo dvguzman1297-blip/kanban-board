@@ -5,6 +5,10 @@ import { Check, FileText, Paperclip, Plus, Trash2, X } from "lucide-react";
 import type { Attachment, Card, Subtask } from "@/lib/types";
 import type { CardComment } from "@/lib/types";
 import { CardComments } from "@/components/card-comments";
+import { CardActivity } from "@/components/card-activity";
+import { MarkdownEditor } from "@/components/markdown-editor";
+import { TagSelect } from "@/components/tag-select";
+import { useTags } from "@/components/tags-context";
 import { formatSize, isImage } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, type ColorKey } from "@/lib/colors";
 import { useMembers } from "@/components/members-context";
@@ -13,10 +17,10 @@ import { memberName } from "@/lib/board-stats";
 const field = "w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-indigo-500";
 const label = "mb-1 block text-xs font-medium text-zinc-500";
 
-export function CardModal({ card, columnColor, attachments, comments, currentUser, readOnly = false, onUpload, onRemoveAttachment, onSave, onDelete, onClose }: {
+export function CardModal({ card, columnColor, attachments, comments, currentUser, readOnly = false, onUpload, onRemoveAttachment, onSave, onSaveTags, onManageTags, onSaveTemplate, onDelete, onClose }: {
   card: Card; columnColor: ColorKey; attachments: Attachment[]; comments: CardComment[]; currentUser: { id: string; name: string }; readOnly?: boolean;
   onUpload: (cardId: string, files: File[]) => Promise<string[]>; onRemoveAttachment: (a: Attachment) => void;
-  onSave: (patch: Partial<Card>) => void; onDelete: () => void; onClose: () => void;
+  onSave: (patch: Partial<Card>) => void; onSaveTags: (ids: string[]) => void; onManageTags?: () => void; onSaveTemplate?: (name: string) => Promise<string | null>; onDelete: () => void; onClose: () => void;
 }) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description ?? "");
@@ -24,6 +28,16 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
   const [energy, setEnergy] = useState<Card["energy_level"]>(card.energy_level);
   const [due, setDue] = useState(card.due_date ?? "");
   const members = useMembers();
+  const [templateMsg, setTemplateMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const saveTemplate = async () => {
+    const name = prompt("Template name (saves the card as last saved):", card.title.slice(0, 60));
+    if (!name?.trim() || !onSaveTemplate) return;
+    const err = await onSaveTemplate(name.trim());
+    setTemplateMsg(err ? { ok: false, text: err } : { ok: true, text: "Template saved." });
+  };
+  const { byCard } = useTags();
+  const initialTagIds = byCard[card.id] ?? [];
+  const [tagIds, setTagIds] = useState<string[]>(initialTagIds);
   const [assignee, setAssignee] = useState(card.assignee_id ?? "");
   const [color, setColor] = useState<string | null>(card.color ?? null); // null = Auto (column colour)
   const [subtasks, setSubtasks] = useState<Subtask[]>(card.subtasks ?? []);
@@ -63,6 +77,7 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
       title: title.trim(), description: description.trim() || null, priority,
       energy_level: energy, due_date: due || null, subtasks: subs, color, assignee_id: assignee || null,
     });
+    if (tagIds.length !== initialTagIds.length || tagIds.some((id) => !initialTagIds.includes(id))) onSaveTags(tagIds);
     onClose();
   };
 
@@ -85,7 +100,7 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
           </div>
           <div>
             <label className={label}>Description</label>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className={field} />
+            <MarkdownEditor value={description} onChange={setDescription} readOnly={readOnly} />
           </div>
 
           <div>
@@ -120,6 +135,11 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
                 {["low", "medium", "high"].map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className={label}>Tags</label>
+            <TagSelect value={tagIds} onChange={setTagIds} onManage={readOnly ? undefined : onManageTags} />
           </div>
 
           <div>
@@ -201,8 +221,12 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
           </div>
         </fieldset>
         <CardComments cardId={card.id} initialComments={comments} currentUser={currentUser} />
+        <CardActivity cardId={card.id} />
 
+        {templateMsg && <p role={templateMsg.ok ? "status" : "alert"} className={`mt-3 text-xs ${templateMsg.ok ? "text-emerald-300" : "text-rose-400"}`}>{templateMsg.text}</p>}
         <div className="mt-6 flex items-center justify-between">
+          {onSaveTemplate && <button type="button" onClick={saveTemplate} title="Save this card as a reusable template"
+            className="rounded-lg px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">Save as template</button>}
           {!readOnly && <button onClick={() => confirm("Delete this card?") && (onDelete(), onClose())}
             className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-rose-400 hover:bg-rose-500/10">
             <Trash2 className="h-4 w-4" /> Delete

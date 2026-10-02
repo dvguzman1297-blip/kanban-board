@@ -6,6 +6,9 @@ import { PALETTE, type ColorKey } from "@/lib/colors";
 import { isImage } from "@/lib/attachments";
 import { useMembers } from "@/components/members-context";
 import { memberName } from "@/lib/board-stats";
+import { stripMarkdown } from "@/lib/markdown";
+import { useBoardUi } from "@/components/board-ui-context";
+import { CardTagPills } from "@/components/tags-context";
 import type { Attachment, Card } from "@/lib/types";
 
 // Priority = slate -> indigo -> orange -> red.  Energy = green -> yellow -> violet.  (No overlap, so they never blend.)
@@ -42,9 +45,15 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
 }) {
   const { startFocus } = useFocus();
   const assignee = useMembers().find((m) => m.id === card.assignee_id);
-  const [renaming, setRenaming] = useState(false);
+  const ui = useBoardUi();
+  const [localRenaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(card.title);
+  const [prevTitle, setPrevTitle] = useState(card.title);
+  if (prevTitle !== card.title) { setPrevTitle(card.title); setDraft(card.title); } // follow edits made elsewhere
   const cancel = useRef(false);
+  const renaming = localRenaming || (!overlay && ui.renameId === card.id); // E hotkey sets renameId
+  const selected = !overlay && ui.selectedIds.has(card.id);
+  const focused = !overlay && ui.focusedId === card.id;
 
   const subs = card.subtasks ?? [];
   const done = subs.filter((s) => s.done).length;
@@ -52,6 +61,7 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
 
   const commit = () => {
     setRenaming(false);
+    ui.clearRename();
     if (cancel.current) { cancel.current = false; return; }
     const t = draft.trim();
     if (t && t !== card.title) onRename?.(t);
@@ -63,8 +73,16 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
 
   return (
     <div className={`rounded-lg bg-zinc-950 ${overlay ? "rotate-2 shadow-2xl" : ""}`}>
-      <div onClick={onEdit}
-        className={`group relative cursor-pointer rounded-lg border p-3 text-sm shadow-sm ${PALETTE[colorKey].card} ${overlay ? "ring-1 ring-indigo-500" : ""}`}>
+      <div id={overlay ? undefined : `card-${card.id}`} aria-selected={selected || undefined}
+        onClick={(e) => {
+          if (ui.selectMode || e.shiftKey || e.ctrlKey || e.metaKey) { e.preventDefault(); ui.toggleSelect(card.id); } else onEdit?.();
+        }}
+        className={`group relative cursor-pointer rounded-lg border p-3 text-sm shadow-sm ${PALETTE[colorKey].card} ${overlay ? "ring-1 ring-indigo-500" : ""} ${
+          selected ? "ring-2 ring-indigo-400" : focused ? "ring-2 ring-sky-400/80" : ""} ${card.archived_at ? "opacity-60" : ""}`}>
+        {(ui.selectMode || selected) && !overlay && (
+          <input type="checkbox" checked={selected} onChange={() => ui.toggleSelect(card.id)} onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()} aria-label={`Select ${card.title}`} className="absolute right-2 top-2 z-10 h-4 w-4 accent-indigo-500" />
+        )}
         {showPreviews && attachments.length > 0 && <AttachmentPreview attachments={attachments} />}
 
         <div className="flex items-start gap-2">
@@ -84,9 +102,12 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
           )}
         </div>
 
-        {card.description && <p className="mt-1 ml-6 line-clamp-2 break-words text-xs leading-snug text-zinc-500 [overflow-wrap:anywhere]">{card.description}</p>}
+        {card.description && <p className="mt-1 ml-6 line-clamp-2 break-words text-xs leading-snug text-zinc-500 [overflow-wrap:anywhere]">{stripMarkdown(card.description)}</p>}
+
+        <CardTagPills cardId={card.id} />
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          {card.archived_at && <span className="rounded bg-zinc-700/60 px-1.5 py-0.5 text-zinc-300">Archived</span>}
           <PriorityBadge value={card.priority} />
           <EnergyBadge value={card.energy_level} />
           {card.due_date && <span className="flex items-center gap-1 text-zinc-500"><Calendar className="h-3 w-3" />{card.due_date}</span>}

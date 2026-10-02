@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [{ data: boards }, { data: cols }, { data: cards }, { data: profile }] = await Promise.all([
     supabase.from("boards").select("id, user_id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
     supabase.from("columns").select("id, board_id, name, wip_limit"),
-    supabase.from("cards").select("column_id, board_id, due_date"),
+    supabase.from("cards").select("column_id, board_id, due_date, archived_at"),
     supabase.from("profiles").select("first_name, full_name, display_name, avatar_url, theme").eq("id", user.id).maybeSingle(),
   ]);
 
@@ -37,7 +37,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const activeIds = new Set(boardList.filter((b) => !b.is_archived).map((b) => b.id));
   const boardName = Object.fromEntries(boardList.map((b) => [b.id, b.name as string]));
   const colList = (cols ?? []).filter((c) => activeIds.has(c.board_id));
-  const cardList = (cards ?? []).filter((c) => activeIds.has(c.board_id));
+  const cardList = (cards ?? []).filter((c) => activeIds.has(c.board_id) && !c.archived_at);
 
   // Sidebar WIP status per board + WIP alerts
   const wip: Record<string, { used: number; limit: number }> = {};

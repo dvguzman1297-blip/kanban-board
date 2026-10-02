@@ -71,14 +71,23 @@ export async function deleteBoard(id: string) {
   redirect("/");
 }
 
-export async function createCard(input: { column_id: string; board_id: string; title: string; order_index: number; due_date?: string | null } & CardAttrs) {
+export async function createCard(input: { column_id: string; board_id: string; title: string; order_index: number; due_date?: string | null; description?: string | null; subtasks?: { id: string; title: string; done: boolean }[] } & CardAttrs) {
   const supabase = await createClient();
   const { column_id, board_id, title, order_index } = input;
   const due_date = input.due_date && /^\d{4}-\d{2}-\d{2}$/.test(input.due_date) ? input.due_date : null;
   const { data, error } = await supabase.from("cards")
-    .insert({ column_id, board_id, title, order_index, due_date, ...pickAttrs(input) }).select().single();
+    .insert({ column_id, board_id, title, order_index, due_date, ...pickAttrs(input), ...pickContent(input) }).select().single();
   if (error) throw error;
   return data;
+}
+// Template content accepted at creation time (validated and size-capped).
+function pickContent(x: { description?: string | null; subtasks?: { id: string; title: string; done: boolean }[] }) {
+  const out: Record<string, unknown> = {};
+  if (typeof x.description === "string") out.description = x.description.slice(0, 20000) || null;
+  if (Array.isArray(x.subtasks)) {
+    out.subtasks = x.subtasks.slice(0, 50).map((s) => ({ id: String(s.id).slice(0, 64), title: String(s.title).trim().slice(0, 200), done: !!s.done })).filter((s) => s.title);
+  }
+  return out;
 }
 type CardAttrs = { priority?: string; energy_level?: string; color?: string | null };
 
@@ -108,8 +117,11 @@ export async function updateCard(id: string, patch: Record<string, unknown>) {
   const allowed = new Set(["title", "description", "priority", "energy_level", "due_date", "start_date", "subtasks", "color", "assignee_id"]); // assignee membership is enforced by a DB trigger
   const safePatch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
   if (!Object.keys(safePatch).length) return;
-  const { error } = await supabase.from("cards").update(safePatch).eq("id", id);
+  // Database rules (e.g. all subtasks done -> Done) may change more than we sent, so hand the row back.
+  const { data, error } = await supabase.from("cards").update(safePatch).eq("id", id)
+    .select("column_id, order_index, completed_at, subtasks").single();
   if (error) throw error;
+  return data;
 }
 export async function deleteCard(id: string) {
   const supabase = await createClient();

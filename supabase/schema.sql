@@ -581,3 +581,268 @@ end $$;
 drop trigger if exists cards_validate_assignee on public.cards;
 create trigger cards_validate_assignee before insert or update on public.cards
   for each row execute function public.validate_card_assignee();
+
+-- ---------- Card extras: tags, reactions, audit trail (migration 010) ----------
+-- Module 1: custom tags, comment reactions and a per-card audit trail.
+
+-- ---------- Tags (per board, managed by editors) ----------
+create table if not exists public.tags (
+  id uuid primary key default gen_random_uuid(),
+  board_id uuid not null references public.boards(id) on delete cascade,
+  name text not null check (char_length(trim(name)) between 1 and 30),
+  color text not null default 'indigo',            -- palette key from lib/colors.ts
+  created_at timestamptz not null default now()
+);
+create unique index if not exists tags_board_name_idx on public.tags(board_id, lower(trim(name)));
+
+create table if not exists public.card_tags (
+  card_id uuid not null references public.cards(id) on delete cascade,
+  tag_id uuid not null references public.tags(id) on delete cascade,
+  primary key (card_id, tag_id)
+);
+create index if not exists card_tags_tag_idx on public.card_tags(tag_id);
+
+alter table public.tags enable row level security;
+alter table public.card_tags enable row level security;
+
+drop policy if exists "tags_member_read" on public.tags;
+drop policy if exists "tags_editor_write" on public.tags;
+create policy "tags_member_read" on public.tags for select using (public.is_board_member(board_id));
+create policy "tags_editor_write" on public.tags for all
+  using (public.can_edit_board(board_id)) with check (public.can_edit_board(board_id));
+
+drop policy if exists "card_tags_member_read" on public.card_tags;
+drop policy if exists "card_tags_editor_insert" on public.card_tags;
+drop policy if exists "card_tags_editor_delete" on public.card_tags;
+create policy "card_tags_member_read" on public.card_tags for select using (
+  exists (select 1 from public.cards c where c.id = card_id and public.is_board_member(c.board_id))
+);
+-- The card and the tag must belong to the same board.
+create policy "card_tags_editor_insert" on public.card_tags for insert with check (
+  exists (select 1 from public.cards c join public.tags t on t.id = tag_id
+           where c.id = card_id and c.board_id = t.board_id and public.can_edit_board(c.board_id))
+);
+create policy "card_tags_editor_delete" on public.card_tags for delete using (
+  exists (select 1 from public.cards c where c.id = card_id and public.can_edit_board(c.board_id))
+);
+
+-- ---------- Comment reactions ----------
+create table if not exists public.comment_reactions (
+  comment_id uuid not null references public.card_comments(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  emoji text not null check (emoji in ('👍','🚀','🎉','❤️','👀')),
+  created_at timestamptz not null default now(),
+  primary key (comment_id, user_id, emoji)
+);
+alter table public.comment_reactions enable row level security;
+
+drop policy if exists "reactions_member_read" on public.comment_reactions;
+drop policy if exists "reactions_member_insert" on public.comment_reactions;
+drop policy if exists "reactions_own_delete" on public.comment_reactions;
+create policy "reactions_member_read" on public.comment_reactions for select using (
+  exists (select 1 from public.card_comments cm join public.cards c on c.id = cm.card_id
+           where cm.id = comment_id and public.is_board_member(c.board_id))
+);
+create policy "reactions_member_insert" on public.comment_reactions for insert with check (
+  user_id = auth.uid() and exists (
+    select 1 from public.card_comments cm join public.cards c on c.id = cm.card_id
+     where cm.id = comment_id and public.is_board_member(c.board_id))
+);
+create policy "reactions_own_delete" on public.comment_reactions for delete using (user_id = auth.uid());
+
+-- ---------- Card audit trail ----------
+-- Written only by the security-definer triggers below; readable by board members.
+create table if not exists public.card_events (
+  id uuid primary key default gen_random_uuid(),
+  card_id uuid not null references public.cards(id) on delete cascade,
+  board_id uuid not null,
+  user_id uuid,                                  -- the actor (auth.uid() at the time)
+  kind text not null,
+  detail jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists card_events_card_idx on public.card_events(card_id, created_at desc);
+
+alter table public.card_events enable row level security;
+drop policy if exists "card_events_member_read" on public.card_events;
+create policy "card_events_member_read" on public.card_events for select using (public.is_board_member(board_id));
+
+create or replace function public.profile_label(uid uuid) returns text
+language sql stable security definer set search_path = public as $$
+  select coalesce(nullif(trim(display_name), ''), nullif(trim(full_name), ''), nullif(trim(first_name), ''), email)
+    from public.profiles where id = uid;
+$$;
+
+create or replace function public.log_card_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  actor uuid := auth.uid();
+  sub jsonb;
+  prev jsonb;
+begin
+  if tg_op = 'INSERT' then
+    insert into public.card_events (card_id, board_id, user_id, kind, detail)
+    values (new.id, new.board_id, actor, 'created',
+            jsonb_build_object('column', (select name from public.columns where id = new.column_id)));
+    return null;
+  end if;
+
+  if new.column_id is distinct from old.column_id then
+    insert into public.card_events (card_id, board_id, user_id, kind, detail)
+    values (new.id, new.board_id, actor, 'moved', jsonb_build_object(
+      'from', (select name from public.columns where id = old.column_id),
+      'to',   (select name from public.columns where id = new.column_id)));
+  end if;
+  if new.due_date is distinct from old.due_date then
+    insert into public.card_events (card_id, board_id, user_id, kind, detail)
+    values (new.id, new.board_id, actor, 'due_date', jsonb_build_object('from', old.due_date, 'to', new.due_date));
+  end if;
+  if new.assignee_id is distinct from old.assignee_id then
+    insert into public.card_events (card_id, board_id, user_id, kind, detail)
+    values (new.id, new.board_id, actor, 'assignee', jsonb_build_object(
+      'from', public.profile_label(old.assignee_id), 'to', public.profile_label(new.assignee_id)));
+  end if;
+  if new.priority is distinct from old.priority then
+    insert into public.card_events (card_id, board_id, user_id, kind, detail)
+    values (new.id, new.board_id, actor, 'priority', jsonb_build_object('from', old.priority, 'to', new.priority));
+  end if;
+
+  if new.subtasks is distinct from old.subtasks then
+    for sub in select * from jsonb_array_elements(coalesce(new.subtasks, '[]'::jsonb)) loop
+      prev := null;
+      select value into prev from jsonb_array_elements(coalesce(old.subtasks, '[]'::jsonb)) where value->>'id' = sub->>'id' limit 1;
+      if prev is not null and (prev->>'done')::boolean is distinct from (sub->>'done')::boolean then
+        insert into public.card_events (card_id, board_id, user_id, kind, detail)
+        values (new.id, new.board_id, actor,
+                case when (sub->>'done')::boolean then 'subtask_done' else 'subtask_reopened' end,
+                jsonb_build_object('title', sub->>'title'));
+      end if;
+    end loop;
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists cards_log_events on public.cards;
+create trigger cards_log_events after insert or update on public.cards
+  for each row execute function public.log_card_events();
+
+create or replace function public.log_card_tag_events() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare cid uuid := coalesce(new.card_id, old.card_id);
+        tid uuid := coalesce(new.tag_id, old.tag_id);
+        bid uuid;
+begin
+  -- When a card is deleted its card_tags cascade away; there is nothing left to log against.
+  select board_id into bid from public.cards where id = cid;
+  if bid is null then return null; end if;
+  insert into public.card_events (card_id, board_id, user_id, kind, detail)
+  values (cid, bid, auth.uid(), case when tg_op = 'INSERT' then 'tag_added' else 'tag_removed' end,
+          jsonb_build_object('tag', (select name from public.tags where id = tid)));
+  return null;
+end $$;
+
+drop trigger if exists card_tags_log_events on public.card_tags;
+create trigger card_tags_log_events after insert or delete on public.card_tags
+  for each row execute function public.log_card_tag_events();
+
+-- ---------- Archive + card templates (migration 011) ----------
+-- Module 2: card archiving (bulk archive) and reusable card templates.
+
+alter table public.cards add column if not exists archived_at timestamptz;
+create index if not exists cards_archived_idx on public.cards(board_id) where archived_at is not null;
+
+-- Custom templates are shared with the whole board; editors manage them.
+-- The four built-in templates (Bug Report, Feature Spec, ...) live in code.
+create table if not exists public.card_templates (
+  id uuid primary key default gen_random_uuid(),
+  board_id uuid not null references public.boards(id) on delete cascade,
+  name text not null check (char_length(trim(name)) between 1 and 60),
+  title text not null default '',
+  description text,
+  priority card_priority not null default 'medium',
+  energy_level energy_level not null default 'medium',
+  subtasks jsonb not null default '[]'::jsonb,
+  created_by uuid references auth.users(id) on delete set null default auth.uid(),
+  created_at timestamptz not null default now()
+);
+create index if not exists card_templates_board_idx on public.card_templates(board_id);
+
+alter table public.card_templates enable row level security;
+drop policy if exists "card_templates_member_read" on public.card_templates;
+drop policy if exists "card_templates_editor_write" on public.card_templates;
+create policy "card_templates_member_read" on public.card_templates for select using (public.is_board_member(board_id));
+create policy "card_templates_editor_write" on public.card_templates for all
+  using (public.can_edit_board(board_id)) with check (public.can_edit_board(board_id));
+
+-- ---------- Automations + auto-archive (migration 012) ----------
+-- Module 3: rule-based automations and Done-column auto-archiving.
+
+alter table public.boards add column if not exists auto_archive_days integer
+  check (auto_archive_days is null or auto_archive_days between 1 and 365);   -- null = never
+
+-- ---------- Rules (run in the database so every client gets them) ----------
+--  1. All subtasks checked  -> move the card to the board's "Done" column.
+--  2. Card enters "Done"    -> record completed_at and tick any remaining subtasks.
+-- A BEFORE trigger edits the row being written, so no recursion and the audit trail
+-- (log_card_events, an AFTER trigger) records the resulting move.
+create or replace function public.apply_card_rules() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  done_id uuid;
+  last_order double precision;
+  entering_done boolean := false;
+begin
+  select c.id into done_id from public.columns c
+   where c.board_id = new.board_id and lower(trim(c.name)) = 'done'
+   order by c.order_index limit 1;
+  if done_id is null then return new; end if;
+
+  -- Rule 1: subtasks just changed and every one is done (and the user did not move the card themselves).
+  if new.subtasks is distinct from old.subtasks
+     and new.column_id = old.column_id
+     and new.column_id <> done_id
+     and jsonb_typeof(new.subtasks) = 'array'
+     and jsonb_array_length(new.subtasks) > 0
+     and not exists (select 1 from jsonb_array_elements(new.subtasks) s where coalesce((s->>'done')::boolean, false) = false)
+  then
+    select coalesce(max(order_index), 0) into last_order from public.cards where column_id = done_id;
+    new.column_id := done_id;
+    new.order_index := last_order + 1000;
+  end if;
+
+  -- Rule 2: the card is (now) in Done.
+  entering_done := new.column_id = done_id and old.column_id is distinct from done_id;
+  if entering_done then
+    new.completed_at := coalesce(new.completed_at, old.completed_at, now());
+    if jsonb_typeof(new.subtasks) = 'array' and jsonb_array_length(new.subtasks) > 0 then
+      select jsonb_agg(jsonb_set(t.s, '{done}', 'true'::jsonb) order by t.n) into new.subtasks
+        from jsonb_array_elements(new.subtasks) with ordinality as t(s, n);
+    end if;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists cards_rules on public.cards;
+create trigger cards_rules before update on public.cards
+  for each row execute function public.apply_card_rules();
+
+-- ---------- Auto-archive Done cards ----------
+-- Archives cards that have sat in Done for longer than the board's setting.
+-- Called when a board is opened (and by the settings action), so it needs no scheduler.
+-- Optional: if pg_cron is enabled on your project you can also run it nightly:
+--   select cron.schedule('flowdeck-archive', '0 3 * * *',
+--     $$ select public.sweep_board_archive(id) from public.boards where auto_archive_days is not null $$);
+create or replace function public.sweep_board_archive(target_board_id uuid) returns integer
+language plpgsql security definer set search_path = public as $$
+declare days integer; n integer;
+begin
+  if not public.is_board_member(target_board_id) then return 0; end if;
+  select auto_archive_days into days from public.boards where id = target_board_id;
+  if days is null then return 0; end if;
+  update public.cards k set archived_at = now()
+   where k.board_id = target_board_id and k.archived_at is null
+     and k.column_id in (select c.id from public.columns c where c.board_id = target_board_id and lower(trim(c.name)) = 'done')
+     and coalesce(k.completed_at, k.created_at) < now() - make_interval(days => days);
+  get diagnostics n = row_count;
+  return n;
+end $$;

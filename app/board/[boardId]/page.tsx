@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BoardClient } from "@/components/board-client";
 import { timeAgo } from "@/lib/time";
 import { BUCKET, SIGNED_URL_TTL } from "@/lib/attachments";
-import type { Attachment, CardComment, Member } from "@/lib/types";
+import type { Attachment, CardComment, CardTemplate, Member, Tag } from "@/lib/types";
 
 export default async function BoardPage({ params, searchParams }: {
   params: Promise<{ boardId: string }>; searchParams: Promise<{ card?: string }>;
@@ -12,6 +12,9 @@ export default async function BoardPage({ params, searchParams }: {
   const { card: openCardId } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
+
+  // Archive stale Done cards per the board's setting before loading them (no-op when the setting is off).
+  await supabase.rpc("sweep_board_archive", { target_board_id: boardId });
 
   // RLS guarantees a foreign/unknown id simply returns null
   const { data: board } = await supabase.from("boards").select("*").eq("id", boardId).single();
@@ -65,13 +68,22 @@ export default async function BoardPage({ params, searchParams }: {
     id, first_name: profileMap.get(id)?.first_name ?? null, full_name: profileMap.get(id)?.full_name ?? null,
     display_name: profileMap.get(id)?.display_name ?? null, avatar_url: profileMap.get(id)?.avatar_url ?? null,
   }));
+  const [{ data: tagRows }, { data: cardTagRows }] = await Promise.all([
+    supabase.from("tags").select("*").eq("board_id", board.id).order("name"),
+    cardIds.length ? supabase.from("card_tags").select("card_id, tag_id").in("card_id", cardIds) : Promise.resolve({ data: [] as { card_id: string; tag_id: string }[] }),
+  ]);
+  const { data: templateRows } = await supabase.from("card_templates").select("*").eq("board_id", board.id).order("created_at");
+  const initialTemplates = (templateRows ?? []) as CardTemplate[];
+  const initialTags = (tagRows ?? []) as Tag[];
+  const initialCardTags: Record<string, string[]> = {};
+  for (const r of cardTagRows ?? []) (initialCardTags[r.card_id as string] ??= []).push(r.tag_id as string);
   const fullName = String(user?.user_metadata?.full_name || currentProfile?.full_name || "").trim();
   const displayName = String(user?.user_metadata?.first_name || currentProfile?.first_name || fullName || "");
   const currentUser = { id: user?.id ?? "", name: displayName.trim().split(/\s+/)[0] || user?.email?.split("@")[0] || "You" };
 
   return (
     <BoardClient key={board.id} board={board} initialColumns={columns ?? []}
-      initialCards={cards ?? []} initialAttachments={attachments} initialComments={initialComments} members={members}
+      initialCards={cards ?? []} initialAttachments={attachments} initialComments={initialComments} members={members} initialTags={initialTags} initialCardTags={initialCardTags} initialTemplates={initialTemplates}
       currentUser={currentUser} canInvite={board.user_id === user?.id} canEdit={canEdit} canAdmin={canAdmin} initialOpenCardId={openCardId ?? null} />
   );
 }

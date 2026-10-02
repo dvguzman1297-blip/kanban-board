@@ -9,8 +9,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Search, AlertTriangle, Pencil, ChevronsLeft, ChevronsRight, ChevronDown, TrendingUp, Ban, Clock,
-  Columns3, List, CalendarDays, CalendarRange, LayoutDashboard, Check, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
+  Columns3, List, CalendarDays, CalendarRange, LayoutDashboard, Check, X, Eye, EyeOff, Tags as TagsIcon, CheckSquare, Archive, LayoutTemplate, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
 } from "lucide-react";
+import { setCardTags } from "@/app/card-extras-actions";
+import { useRouter } from "next/navigation";
 import { createCard, moveCard, updateCard, deleteCard, renameBoard } from "@/app/actions";
 import { CardModal } from "@/components/card-modal";
 import { InviteMembersButton } from "@/components/invite-members-button";
@@ -18,11 +20,19 @@ import { CardView } from "@/components/card-view";
 import { ListView, CalendarView, TimelineView } from "@/components/board-views";
 import { BoardDashboard } from "@/components/board-dashboard";
 import { MembersProvider } from "@/components/members-context";
+import { TagsProvider } from "@/components/tags-context";
+import { TagManager } from "@/components/tag-manager";
+import { BoardUiProvider, useBoardUi } from "@/components/board-ui-context";
+import { BulkBar } from "@/components/bulk-bar";
+import { BoardSettings } from "@/components/board-settings";
+import { deleteCardTemplate, saveCardAsTemplate } from "@/app/bulk-actions";
+import { builtinTemplates, freshSubtasks } from "@/lib/card-templates";
+import { isTypingTarget, moveCursor, type NavKey } from "@/lib/board-nav";
 import { createClient } from "@/lib/supabase/client";
 import { BUCKET, MAX_BYTES, SIGNED_URL_TTL, safeName } from "@/lib/attachments";
 import { COLOR_KEYS, PALETTE, columnColor, effectiveColor, type ColorKey } from "@/lib/colors";
 import { defaultDueDate, isBlockedName, isDoneName, toISO } from "@/lib/board-utils";
-import type { Attachment, Card, CardComment, Column, Member } from "@/lib/types";
+import type { Attachment, Card, CardComment, CardTemplate, Column, Member, Tag } from "@/lib/types";
 
 type View = "kanban" | "list" | "calendar" | "timeline" | "dashboard";
 type GroupBy = "none" | "priority" | "energy" | "color";
@@ -42,6 +52,8 @@ const lanePatchOf = (g: GroupBy, key: string): CardAttrs =>
   : g === "energy" ? { energy_level: key as Card["energy_level"] }
   : g === "color" ? { color: key === "none" ? null : key } : {};
 
+const allDone = (subs: Card["subtasks"] | null | undefined) => (subs ?? []).map((t) => ({ ...t, done: true }));
+
 /* ---------- WIP state ---------- */
 type Wip = "ok" | "at" | "over";
 const wipState = (c: Column, n: number): Wip =>
@@ -51,13 +63,25 @@ const wipTitle = (c: Column, n: number) =>
   : n > c.wip_limit ? `WIP limit exceeded: ${n} cards, limit is ${c.wip_limit}`
   : n === c.wip_limit ? `At WIP limit (${c.wip_limit}) — finish something before pulling more` : `${n} of ${c.wip_limit} slots used`;
 
-export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, members, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
-  board: { id: string; name: string; description: string | null };
-  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[]; members: Member[];
+export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, members, initialTags, initialCardTags, initialTemplates, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
+  board: { id: string; name: string; description: string | null; auto_archive_days?: number | null };
+  initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[]; members: Member[]; initialTags: Tag[]; initialCardTags: Record<string, string[]>; initialTemplates: CardTemplate[];
   currentUser: { id: string; name: string }; canInvite: boolean; canEdit?: boolean; canAdmin?: boolean; initialOpenCardId?: string | null;
 }) {
   const [cards, setCards] = useState<Card[]>(initialCards);
   const [attachments, setAttachments] = useState<Attachment[]>(initialAttachments);
+  const [tags, setTags] = useState<Tag[]>(initialTags);
+  const [cardTags, setCardTagsState] = useState<Record<string, string[]>>(initialCardTags);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const router = useRouter();
+  const [templates, setTemplates] = useState<CardTemplate[]>(initialTemplates);
+  const [focusedId, setFocusedId] = useState<string | null>(null);   // keyboard cursor
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set()); // Done columns collapsed to a count
+  const bulkSnapshot = useRef<{ cards: Card[]; cardTags: Record<string, string[]> } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(initialOpenCardId ?? null);
   const [q, setQ] = useState("");
@@ -82,6 +106,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
       if (typeof p.previews === "boolean") setPreviews(p.previews);
       if (Array.isArray(p.collapsedCols)) setCollapsedCols(new Set(p.collapsedCols));
       if (Array.isArray(p.collapsedLanes)) setCollapsedLanes(new Set(p.collapsedLanes));
+      if (Array.isArray(p.hiddenCols)) setHiddenCols(new Set(p.hiddenCols));
     } catch {}
     setHydrated(true);
   }, [prefKey]);
@@ -89,10 +114,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     if (!hydrated) return;
     try {
       localStorage.setItem(prefKey, JSON.stringify({
-        view, groupBy, previews, collapsedCols: [...collapsedCols], collapsedLanes: [...collapsedLanes],
+        view, groupBy, previews, collapsedCols: [...collapsedCols], collapsedLanes: [...collapsedLanes], hiddenCols: [...hiddenCols],
       }));
     } catch {}
-  }, [hydrated, prefKey, view, groupBy, previews, collapsedCols, collapsedLanes]);
+  }, [hydrated, prefKey, view, groupBy, previews, collapsedCols, collapsedLanes, hiddenCols]);
 
   const toggleIn = (set: Set<string>, id: string) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); return n; };
 
@@ -120,22 +145,28 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   };
 
   /* ---------- filtering + derived data ---------- */
+  const live = useMemo(() => cards.filter((c) => !c.archived_at), [cards]); // archived cards don't count toward stats or WIP
+  const archivedCount = cards.length - live.length;
   const visible = useMemo(() => {
     const ql = q.toLowerCase();
     return cards
       .filter((c) =>
+        (showArchived || !c.archived_at) &&
         (priority === "all" || c.priority === priority) &&
         (energy === "all" || c.energy_level === energy) &&
         (!ql || `${c.title} ${c.description ?? ""}`.toLowerCase().includes(ql)))
       .sort((a, b) => a.order_index - b.order_index);
-  }, [cards, q, priority, energy]);
+  }, [cards, q, priority, energy, showArchived]);
 
+  // Cards in a hidden Done column are not rendered at all (keeps big boards fast); the header shows how many are tucked away.
+  const shown = useMemo(() => visible.filter((c) => !hiddenCols.has(c.column_id)), [visible, hiddenCols]);
+  const hiddenCount = (colId: string) => (hiddenCols.has(colId) ? visible.filter((c) => c.column_id === colId).length : 0);
   const byColumn = useMemo(() => {
     const m: Record<string, Card[]> = {};
     initialColumns.forEach((c) => (m[c.id] = []));
-    visible.forEach((c) => m[c.column_id]?.push(c));
+    shown.forEach((c) => m[c.column_id]?.push(c));
     return m;
-  }, [visible, initialColumns]);
+  }, [shown, initialColumns]);
 
   const attByCard = useMemo(() => {
     const m: Record<string, Attachment[]> = {};
@@ -149,11 +180,11 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     const blockedIds = new Set(initialColumns.filter((c) => isBlockedName(c.name)).map((c) => c.id));
     const today = toISO(new Date());
     return {
-      velocity: cards.filter((c) => c.completed_at && new Date(c.completed_at).getTime() >= weekAgo).length,
-      blocked: cards.filter((c) => blockedIds.has(c.column_id)).length,
-      overdue: cards.filter((c) => c.due_date && c.due_date < today && !doneIds.has(c.column_id)).length,
+      velocity: live.filter((c) => c.completed_at && new Date(c.completed_at).getTime() >= weekAgo).length,
+      blocked: live.filter((c) => blockedIds.has(c.column_id)).length,
+      overdue: live.filter((c) => c.due_date && c.due_date < today && !doneIds.has(c.column_id)).length,
     };
-  }, [cards, initialColumns]);
+  }, [live, initialColumns]);
 
   const lanesOn = view === "kanban" && groupBy !== "none";
   const lanes = useMemo(() => {
@@ -222,6 +253,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     const final: Card = {
       ...cur, ...(laneChanged ? lanePatchOf(groupBy, t.lane!) : {}), column_id: t.col, order_index,
       completed_at: doneNow ? original.completed_at ?? new Date().toISOString() : null,
+      subtasks: doneNow ? allDone(cur.subtasks) : cur.subtasks, // rule: entering Done completes subtasks
     };
     const extra: CardAttrs = {};
     if (final.priority !== original.priority) extra.priority = final.priority;
@@ -242,11 +274,24 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     setCards((p) => [...p, created as Card]);
   };
 
+  const saveTags = (cardId: string, ids: string[]) => {
+    const snapshot = cardTags;
+    setCardTagsState((p) => ({ ...p, [cardId]: ids }));
+    startTransition(async () => {
+      const res = await setCardTags(cardId, ids).catch(() => null);
+      if (!res?.ok) setCardTagsState(snapshot);
+    });
+  };
+
   const saveCard = (id: string, patch: Partial<Card>) => {
     const snapshot = cards;
     setCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c)));
     startTransition(async () => {
-      try { await updateCard(id, patch as Record<string, unknown>); } catch { setCards(snapshot); }
+      try {
+        const row = await updateCard(id, patch as Record<string, unknown>);
+        // Automation rules can move the card or tick subtasks server-side; mirror whatever they did.
+        if (row) setCards((p) => p.map((c) => (c.id === id ? { ...c, column_id: row.column_id, order_index: row.order_index, completed_at: row.completed_at, subtasks: row.subtasks } : c)));
+      } catch { setCards(snapshot); }
     });
   };
 
@@ -295,6 +340,105 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   };
 
   /* ---------- render ---------- */
+  /* ---------- keyboard navigation, multi-select, templates ---------- */
+  const me = currentUser.id;
+  const toggleSelect = (id: string) => setSelectedIds((s) => toggleIn(s, id));
+  const clearSelection = () => { setSelectedIds(new Set()); setSelectMode(false); };
+  const selectedList = useMemo(() => [...selectedIds].filter((id) => cards.some((c) => c.id === id)), [selectedIds, cards]);
+
+  useEffect(() => {
+    if (view !== "kanban") return;
+    const grid = initialColumns.map((c) => (collapsedCols.has(c.id) ? [] : (byColumn[c.id] ?? []).map((k) => k.id)));
+    const KEYS: Record<string, NavKey> = { j: "down", k: "up", h: "left", l: "right", ArrowDown: "down", ArrowUp: "up", ArrowLeft: "left", ArrowRight: "right" };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target) || editingId || tagsOpen) return;
+      const handled = () => { e.preventDefault(); e.stopPropagation(); }; // capture phase: keeps dnd-kit from seeing Space
+
+      if (e.key === "Escape") {
+        if (focusedId || selectedIds.size || selectMode) { handled(); setFocusedId(null); clearSelection(); }
+        return;
+      }
+      const nav = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+      if (nav) {
+        if (e.key.startsWith("Arrow") && !focusedId) return; // arrows only steer once the cursor is active
+        handled();
+        const next = moveCursor(grid, focusedId, nav);
+        setFocusedId(next);
+        if (next) document.getElementById(`card-${next}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        return;
+      }
+      if (!focusedId) return;
+      const key = e.key.toLowerCase();
+      if (key === "x") { handled(); toggleSelect(focusedId); }
+      else if (key === "enter") { handled(); setEditingId(focusedId); }
+      else if (canEdit && (e.key === " " || key === "m")) {
+        const card = cards.find((c) => c.id === focusedId);
+        if (card) { handled(); saveCard(card.id, { assignee_id: card.assignee_id === me ? null : me }); }
+      } else if (canEdit && key === "e") { handled(); setRenameId(focusedId); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, initialColumns, collapsedCols, byColumn, focusedId, selectedIds, selectMode, editingId, tagsOpen, cards, canEdit, me]);
+
+  // Bulk actions update the board optimistically; on failure the snapshot is restored.
+  const takeSnapshot = () => { bulkSnapshot.current = { cards, cardTags }; };
+  const restoreSnapshot = () => {
+    if (bulkSnapshot.current) { setCards(bulkSnapshot.current.cards); setCardTagsState(bulkSnapshot.current.cardTags); }
+    router.refresh();
+  };
+  const bulkChange = (ids: string[], patch: Partial<Card>) => {
+    takeSnapshot();
+    const targetCol = patch.column_id ? colById[patch.column_id] : null;
+    let nextOrder = targetCol ? Math.max(0, ...cards.filter((c) => c.column_id === targetCol.id).map((c) => c.order_index)) : 0;
+    setCards((p) => p.map((c) => {
+      if (!ids.includes(c.id)) return c;
+      if (!targetCol) return { ...c, ...patch };
+      nextOrder += 1000;
+      const toDone = isDoneName(targetCol.name);
+      return { ...c, ...patch, order_index: nextOrder, completed_at: toDone ? c.completed_at ?? new Date().toISOString() : null, subtasks: toDone ? allDone(c.subtasks) : c.subtasks };
+    }));
+  };
+  const bulkRemoved = (ids: string[]) => {
+    takeSnapshot();
+    setCards((p) => p.filter((c) => !ids.includes(c.id)));
+    setAttachments((p) => p.filter((a) => !ids.includes(a.card_id)));
+  };
+  const bulkTags = (ids: string[], tagId: string, add: boolean) => {
+    takeSnapshot();
+    setCardTagsState((p) => {
+      const next = { ...p };
+      for (const id of ids) {
+        const cur = next[id] ?? [];
+        next[id] = add ? (cur.includes(tagId) ? cur : [...cur, tagId]) : cur.filter((t) => t !== tagId);
+      }
+      return next;
+    });
+  };
+
+  const addFromTemplate = async (columnId: string, t: CardTemplate) => {
+    const list = cards.filter((c) => c.column_id === columnId);
+    const order_index = Math.max(0, ...list.map((c) => c.order_index)) + 1000;
+    const created = await createCard({
+      column_id: columnId, board_id: board.id, title: t.title.trim() || t.name, order_index, due_date: defaultDueDate(),
+      description: t.description, subtasks: freshSubtasks(t), priority: t.priority, energy_level: t.energy_level,
+    });
+    setCards((p) => [...p, created as Card]);
+    setEditingId((created as Card).id); // open it so the title/details can be filled in straight away
+  };
+  const removeTemplate = (id: string) => {
+    const snapshot = templates;
+    setTemplates((p) => p.filter((t) => t.id !== id));
+    deleteCardTemplate(id).then((r) => { if (!r.ok) setTemplates(snapshot); }).catch(() => setTemplates(snapshot));
+  };
+  const allTemplates = useMemo(() => [...builtinTemplates(), ...templates], [templates]);
+  const saveAsTemplate = async (cardId: string, name: string) => {
+    const res = await saveCardAsTemplate(cardId, name);
+    if (res.ok) setTemplates((p) => [...p, res.template]);
+    return res.ok ? null : res.error;
+  };
+
   const cardProps = { attByCard, previews, canEdit, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }) };
   const tplVars = {
     "--tpl-sm": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(78vw,1fr)")).join(" "),
@@ -312,6 +456,8 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 
   return (
     <MembersProvider value={members}>
+    <TagsProvider value={{ tags, byCard: cardTags }}>
+    <BoardUiProvider value={{ focusedId, selectedIds, selectMode, renameId, toggleSelect, clearRename: () => setRenameId(null), templates: allTemplates, addFromTemplate, removeTemplate, canEdit }}>
     <div className="flex h-full flex-col">
       <header className="border-b border-zinc-800 px-4 py-3 md:px-6 md:py-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -351,6 +497,11 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
           {/* Invite + view picker */}
           <div className="ml-auto flex items-center gap-2">
             {canInvite && <InviteMembersButton boardId={board.id} boardName={name} />}
+            {canAdmin && <BoardSettings boardId={board.id} days={board.auto_archive_days ?? null} />}
+            <button onClick={() => setTagsOpen(true)} title="Manage tags" aria-label="Manage tags"
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-sm text-zinc-300 hover:border-zinc-700">
+              <TagsIcon className="h-4 w-4" /><span className="hidden sm:inline">Tags</span>
+            </button>
             <ViewMenu views={views} value={view} onChange={setView} />
           </div>
         </div>
@@ -369,6 +520,18 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
             <option value="all">Energy: all</option>
             {["low", "medium", "high"].map((o) => <option key={o} value={o}>Energy: {o}</option>)}
           </select>
+          {canEdit && view !== "dashboard" && (
+            <button onClick={() => { setSelectMode((m) => !m); if (selectMode) setSelectedIds(new Set()); }} aria-pressed={selectMode} title="Select multiple cards (or Shift+click)"
+              className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm ${selectMode ? "border-indigo-500 bg-indigo-500/15 text-indigo-200" : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100"}`}>
+              <CheckSquare className="h-4 w-4" /><span className="hidden sm:inline">Select</span>
+            </button>
+          )}
+          {archivedCount > 0 && (
+            <button onClick={() => setShowArchived((s) => !s)} aria-pressed={showArchived} title={showArchived ? "Hide archived cards" : "Show archived cards"}
+              className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm ${showArchived ? "border-indigo-500 bg-indigo-500/15 text-indigo-200" : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100"}`}>
+              <Archive className="h-4 w-4" /><span className="hidden sm:inline">Archived ({archivedCount})</span>
+            </button>
+          )}
           {view === "kanban" && (
             <>
               <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className={ctl} title="Swimlanes">
@@ -404,8 +567,9 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
             <div className="flex flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4 md:gap-4 md:p-6">
               {initialColumns.map((col) => (
                 <KanbanColumn key={col.id} column={col} colorKey={colColors[col.id]} cards={byColumn[col.id] ?? []}
-                  totalCount={cards.filter((c) => c.column_id === col.id).length}
+                  totalCount={live.filter((c) => c.column_id === col.id).length}
                   collapsed={collapsedCols.has(col.id)} onToggleCollapse={() => setCollapsedCols((s) => toggleIn(s, col.id))}
+                  hiddenCount={hiddenCount(col.id)} onToggleHidden={() => setHiddenCols((s) => toggleIn(s, col.id))}
                   onAdd={(title) => addCard(col.id, title)} {...cardProps} />
               ))}
             </div>
@@ -413,7 +577,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
             <div className="flex-1 overflow-auto p-4 md:p-6">
               <div className={`${gridCls} sticky top-0 z-10 mb-3 bg-zinc-950 pb-2`} style={tplVars}>
                 {initialColumns.map((col) => {
-                  const n = cards.filter((c) => c.column_id === col.id).length;
+                  const n = live.filter((c) => c.column_id === col.id).length;
                   const st = wipState(col, n);
                   return collapsedCols.has(col.id) ? (
                     <button key={col.id} onClick={() => setCollapsedCols((s) => toggleIn(s, col.id))} title={`Expand ${col.name}`}
@@ -422,13 +586,14 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
                     </button>
                   ) : (
                     <div key={col.id} className={`rounded-xl border ${st === "over" ? "border-rose-500/60 bg-rose-500/10" : st === "at" ? "border-amber-500/60 bg-amber-500/5" : "border-zinc-800 bg-zinc-900/60"}`}>
-                      <ColumnHeader column={col} colorKey={colColors[col.id]} totalCount={n} onToggle={() => setCollapsedCols((s) => toggleIn(s, col.id))} />
+                      <ColumnHeader column={col} colorKey={colColors[col.id]} totalCount={n} onToggle={() => setCollapsedCols((s) => toggleIn(s, col.id))}
+                        hidden={hiddenCols.has(col.id)} onToggleHidden={() => setHiddenCols((s) => toggleIn(s, col.id))} />
                     </div>
                   );
                 })}
               </div>
               {lanes.map((lane) => {
-                const laneCards = visible.filter((c) => laneKeyOf(c, groupBy) === lane.key);
+                const laneCards = shown.filter((c) => laneKeyOf(c, groupBy) === lane.key);
                 const open = !collapsedLanes.has(lane.key);
                 return (
                   <section key={lane.key} className="mb-4">
@@ -461,17 +626,35 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
         </DndContext>
       )}
 
+      {selectedList.length > 0 && (
+        <BulkBar ids={selectedList} cards={cards} columns={initialColumns} members={members} tags={tags} onClear={clearSelection}
+          onCardsChange={bulkChange} onCardsRemoved={bulkRemoved} onTagsChange={bulkTags} onRefresh={restoreSnapshot} />
+      )}
+
+      {tagsOpen && (
+        <TagManager boardId={board.id} tags={tags} canEdit={canEdit} onClose={() => setTagsOpen(false)}
+          onCreated={(t) => setTags((p) => [...p, t].sort((a, b) => a.name.localeCompare(b.name)))}
+          onUpdated={(t) => setTags((p) => p.map((x) => (x.id === t.id ? t : x)).sort((a, b) => a.name.localeCompare(b.name)))}
+          onDeleted={(id) => {
+            setTags((p) => p.filter((x) => x.id !== id));
+            setCardTagsState((p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.filter((t) => t !== id)])));
+          }} />
+      )}
+
       <AnimatePresence>
         {editingCard && (
           <CardModal key={editingCard.id} card={editingCard} columnColor={colColors[editingCard.column_id]}
             attachments={attByCard[editingCard.id] ?? []} comments={initialComments.filter((comment) => comment.card_id === editingCard.id)}
             currentUser={currentUser} readOnly={!canEdit} onUpload={uploadFiles} onRemoveAttachment={removeAttachment}
-            onSave={(patch) => saveCard(editingCard.id, patch)}
+            onSave={(patch) => saveCard(editingCard.id, patch)} onSaveTags={(ids) => saveTags(editingCard.id, ids)}
+            onManageTags={() => setTagsOpen(true)} onSaveTemplate={canEdit ? (name) => saveAsTemplate(editingCard.id, name) : undefined}
             onDelete={() => removeCard(editingCard.id)}
             onClose={() => setEditingId(null)} />
         )}
       </AnimatePresence>
     </div>
+    </BoardUiProvider>
+    </TagsProvider>
     </MembersProvider>
   );
 }
@@ -482,8 +665,8 @@ type CardActions = {
   onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
 };
 
-function ColumnHeader({ column, colorKey, totalCount, onToggle }:
-  { column: Column; colorKey: ColorKey; totalCount: number; onToggle: () => void }) {
+function ColumnHeader({ column, colorKey, totalCount, onToggle, hidden, onToggleHidden }:
+  { column: Column; colorKey: ColorKey; totalCount: number; onToggle: () => void; hidden?: boolean; onToggleHidden?: () => void }) {
   const st = wipState(column, totalCount);
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
@@ -497,6 +680,13 @@ function ColumnHeader({ column, colorKey, totalCount, onToggle }:
           {st !== "ok" && <AlertTriangle className="h-3 w-3" />}
           {totalCount}{column.wip_limit !== null && ` / ${column.wip_limit}`}
         </span>
+        {onToggleHidden && isDoneName(column.name) && (
+          <button onClick={onToggleHidden} aria-pressed={hidden} title={hidden ? "Show completed / archived cards" : "Hide completed / archived cards"}
+            aria-label={hidden ? "Show completed and archived cards" : "Hide completed and archived cards"}
+            className={`rounded p-1 hover:bg-zinc-800 ${hidden ? "text-indigo-300" : "text-zinc-500 hover:text-zinc-200"}`}>
+            {hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        )}
         <button onClick={onToggle} title="Collapse column" aria-label={`Collapse ${column.name}`}
           className="hidden rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 md:block"><ChevronsLeft className="h-4 w-4" /></button>
       </div>
@@ -504,7 +694,7 @@ function ColumnHeader({ column, colorKey, totalCount, onToggle }:
   );
 }
 
-function AddCard({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
+function AddCard({ onAdd, columnId }: { onAdd: (title: string) => Promise<void>; columnId: string }) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   return adding ? (
@@ -514,9 +704,12 @@ function AddCard({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
         className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-indigo-500" />
     </form>
   ) : (
-    <button onClick={() => setAdding(true)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
-      <Plus className="h-4 w-4" /> Add card
-    </button>
+    <div className="flex items-center gap-1">
+      <button onClick={() => setAdding(true)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
+        <Plus className="h-4 w-4" /> Add card
+      </button>
+      <TemplateMenu columnId={columnId} />
+    </div>
   );
 }
 
@@ -537,9 +730,9 @@ function EmptyDrop({ name, filtered, isOver }: { name: string; filtered: boolean
   );
 }
 
-function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggleCollapse, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
+function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggleCollapse, hiddenCount = 0, onToggleHidden, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
   column: Column; colorKey: ColorKey; cards: Card[]; totalCount: number; collapsed: boolean;
-  onToggleCollapse: () => void; onAdd: (title: string) => Promise<void>;
+  onToggleCollapse: () => void; hiddenCount?: number; onToggleHidden?: () => void; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const st = wipState(column, totalCount);
@@ -565,7 +758,8 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
   return (
     <section ref={setNodeRef}
       className={`flex w-[82vw] max-w-xs shrink-0 snap-start flex-col rounded-xl border transition-colors md:w-auto md:max-w-none md:min-w-[11rem] md:flex-1 ${wrap}`}>
-      <ColumnHeader column={column} colorKey={colorKey} totalCount={totalCount} onToggle={onToggleCollapse} />
+      <ColumnHeader column={column} colorKey={colorKey} totalCount={totalCount} onToggle={onToggleCollapse}
+        hidden={hiddenCount > 0 || undefined} onToggleHidden={onToggleHidden} />
 
       {st === "over" && (
         <div className="mx-3 mb-2 flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs text-rose-300">
@@ -576,7 +770,12 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
 
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-3 pb-2">
-          {cards.length === 0 && <EmptyDrop name={column.name} filtered={totalCount > 0} isOver={isOver} />}
+          {hiddenCount > 0 && (
+            <button onClick={onToggleHidden} className="rounded-lg border border-dashed border-zinc-700 px-3 py-6 text-center text-xs text-zinc-500 hover:border-zinc-500 hover:text-zinc-300">
+              {hiddenCount} card{hiddenCount === 1 ? "" : "s"} hidden — click to show
+            </button>
+          )}
+          {cards.length === 0 && hiddenCount === 0 && <EmptyDrop name={column.name} filtered={totalCount > 0} isOver={isOver} />}
           <AnimatePresence initial={false}>
             {cards.map((c) => (
               <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
@@ -586,7 +785,7 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
         </div>
       </SortableContext>
 
-      {canEdit && <div className="p-3 pt-1"><AddCard onAdd={onAdd} /></div>}
+      {canEdit && <div className="p-3 pt-1"><AddCard onAdd={onAdd} columnId={column.id} /></div>}
     </section>
   );
 }
@@ -608,7 +807,7 @@ function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCar
           ))}
         </AnimatePresence>
       </SortableContext>
-      {canEdit && <AddCard onAdd={onAdd} />}
+      {canEdit && <AddCard onAdd={onAdd} columnId={column.id} />}
     </div>
   );
 }
@@ -657,6 +856,45 @@ function ViewMenu({ views, value, onChange }: { views: [View, string, React.Reac
               className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-800 ${v === value ? "text-indigo-300" : "text-zinc-300"}`}>
               {icon}<span className="flex-1">{label}</span>{v === value && <Check className="h-4 w-4" />}
             </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- "New from template" menu next to Add card ---------- */
+function TemplateMenu({ columnId }: { columnId: string }) {
+  const ui = useBoardUi();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc, true); };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} title="New from template" aria-label="New card from template"
+        className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><LayoutTemplate className="h-4 w-4" /></button>
+      {open && (
+        <div role="menu" className="absolute bottom-9 right-0 z-30 max-h-72 w-60 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+          <p className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-zinc-500">New from template</p>
+          {ui.templates.map((t) => (
+            <div key={t.id} className="flex items-center rounded-lg hover:bg-zinc-800">
+              <button role="menuitem" disabled={busy !== null} className="min-w-0 flex-1 px-3 py-2 text-left text-sm disabled:opacity-60"
+                onClick={async () => { setBusy(t.id); try { await ui.addFromTemplate(columnId, t); setOpen(false); } finally { setBusy(null); } }}>
+                <span className="block truncate">{t.name}</span>
+                <span className="block truncate text-[11px] text-zinc-500">{t.builtin ? "Built-in" : "Board template"} · {t.subtasks.length} subtasks</span>
+              </button>
+              {!t.builtin && <button aria-label={`Delete template ${t.name}`} title="Delete template" onClick={() => confirm(`Delete the template “${t.name}”?`) && ui.removeTemplate(t.id)}
+                className="mr-1 rounded p-1.5 text-zinc-500 hover:text-rose-400"><X className="h-3.5 w-3.5" /></button>}
+            </div>
           ))}
         </div>
       )}
