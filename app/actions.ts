@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BUCKET } from "@/lib/attachments";
+import { resolveInviteNotifications } from "@/lib/notifications-server";
 
 // Storage files are not removed by DB cascades, so delete them explicitly first.
 async function removeFiles(supabase: Awaited<ReturnType<typeof createClient>>, column: "card_id" | "board_id", id: string) {
@@ -243,6 +244,8 @@ export async function acceptBoardInvite(tokenInput: string) {
     board_id: invite.board_id, user_id: user.id, role: invite.role, status: "accepted",
   });
   if (memberError) throw new Error(memberError.code === "23505" ? "You already belong to this board." : "Could not accept this invitation.");
+  // Keep the in-app notification in step when the invite is accepted through the email link.
+  await resolveInviteNotifications(supabase, user.id, "accepted", { inviteId: invite.id });
   await supabase.from("board_invites").delete().eq("id", invite.id);
   revalidatePath("/dashboard");
   revalidatePath(`/board/${invite.board_id}`);

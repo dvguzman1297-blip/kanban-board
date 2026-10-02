@@ -45,3 +45,31 @@ describe("moveCursor", () => {
     expect(moveCursor(cols, "gone", "left")).toBe("a1");
   });
 });
+
+import { applyChange, inviteParts, notificationHref, unreadCount, type AppNotification } from "../notifications";
+
+describe("notifications helpers", () => {
+  const n = (id: string, at: string, over: Partial<AppNotification> = {}): AppNotification => ({
+    id, user_id: "u", type: "system", title: "t", message: "", metadata: {}, is_read: false, created_at: at, ...over,
+  });
+  it("describes invites and counts unread", () => {
+    expect(inviteParts({ inviter_name: "Dave", board_name: "Main Operations", role: "editor" })).toEqual({ inviter: "Dave", board: "Main Operations", role: "Editor" });
+    expect(inviteParts({}).role).toBe("Editor");
+    expect(unreadCount([n("a", "1"), n("b", "2", { is_read: true })])).toBe(1);
+  });
+  it("applies realtime changes newest-first without duplicating", () => {
+    let list = [n("a", "2026-01-01")];
+    list = applyChange(list, "INSERT", n("b", "2026-02-01"));
+    expect(list.map((x) => x.id)).toEqual(["b", "a"]);
+    list = applyChange(list, "INSERT", n("b", "2026-02-01")); // echo of our own insert
+    expect(list).toHaveLength(2);
+    list = applyChange(list, "UPDATE", { id: "a", is_read: true });
+    expect(list.find((x) => x.id === "a")?.is_read).toBe(true);
+    list = applyChange(list, "DELETE", { id: "b" });
+    expect(list.map((x) => x.id)).toEqual(["a"]);
+  });
+  it("links assignments to the card", () => {
+    expect(notificationHref(n("x", "1", { type: "card_assigned", metadata: { board_id: "b1", card_id: "c1" } }))).toBe("/board/b1?card=c1");
+    expect(notificationHref(n("y", "1", { type: "board_invite" }))).toBeNull();
+  });
+});

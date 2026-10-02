@@ -6,11 +6,13 @@ import { createClient } from "@/lib/supabase/client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { QuickTaskModal } from "@/components/quick-task-modal";
+import { NotificationList, useNotifications } from "@/components/notifications";
+import type { AppNotification } from "@/lib/notifications";
 
 type Board = { id: string; name: string; is_archived: boolean };
 export type Alert = { text: string; href: string; tone: "rose" | "amber" };
 
-function Popover({ button, children }: { button: (open: boolean, toggle: () => void) => React.ReactNode; children: (close: () => void) => React.ReactNode }) {
+function Popover({ button, children, wide = false }: { wide?: boolean; button: (open: boolean, toggle: () => void) => React.ReactNode; children: (close: () => void) => React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -25,7 +27,7 @@ function Popover({ button, children }: { button: (open: boolean, toggle: () => v
     <div ref={ref} className="relative">
       {button(open, () => setOpen((o) => !o))}
       {open && (
-        <div className="absolute right-0 top-11 z-50 w-72 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl">
+        <div className={`absolute right-0 top-11 z-50 rounded-xl border border-zinc-800 bg-zinc-900 p-2 shadow-xl ${wide ? "w-[26rem] max-w-[calc(100vw-1rem)]" : "w-72"}`}>
           {children(() => setOpen(false))}
         </div>
       )}
@@ -33,7 +35,9 @@ function Popover({ button, children }: { button: (open: boolean, toggle: () => v
   );
 }
 
-export function TopBar({ boards, alerts, email, displayName, avatarUrl }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string; avatarUrl: string | null }) {
+export function TopBar({ boards, alerts, email, displayName, avatarUrl, userId, initialNotifications }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string; avatarUrl: string | null; userId: string; initialNotifications: AppNotification[] }) {
+  const { items: notes, unread, patch, markRead, markAllRead } = useNotifications(userId, initialNotifications);
+  const badge = unread + alerts.length;
   const [palette, setPalette] = useState(false);
   const [quick, setQuick] = useState(false);
   const active = boards.filter((b) => !b.is_archived);
@@ -66,24 +70,37 @@ export function TopBar({ boards, alerts, email, displayName, avatarUrl }: { boar
             <Plus className="h-4 w-4" /><span className="hidden sm:inline">Quick Task</span>
           </button>
 
-          <Popover button={(_o, toggle) => (
-            <button onClick={toggle} title="Alerts" aria-label="Alerts" className={iconBtn}>
+          <Popover wide button={(_o, toggle) => (
+            <button onClick={toggle} title="Notifications" aria-label={`Notifications${badge ? `, ${badge} unread` : ""}`} className={iconBtn}>
               <Bell className="h-4 w-4" />
-              {alerts.length > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">{alerts.length}</span>}
+              {badge > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">{badge > 99 ? "99+" : badge}</span>}
             </button>
           )}>
-            {(close) => alerts.length === 0 ? (
-              <p className="px-3 py-4 text-center text-sm text-zinc-500">You&apos;re all caught up.</p>
-            ) : (
-              <ul>
-                {alerts.map((a, i) => (
-                  <li key={i}>
-                    <Link href={a.href} onClick={close} className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-800">
-                      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.tone === "rose" ? "bg-rose-500" : "bg-amber-500"}`} />{a.text}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+            {(close) => (
+              <div className="max-h-[70dvh] overflow-y-auto">
+                <div className="flex items-center justify-between px-3 py-2">
+                  <h2 className="text-sm font-semibold">Notifications</h2>
+                  <div className="flex items-center gap-3 text-xs">
+                    {unread > 0 && <button onClick={markAllRead} className="text-indigo-300 hover:text-indigo-200">Mark all read</button>}
+                    <Link href="/notifications" onClick={close} className="text-zinc-400 hover:text-zinc-200">View all</Link>
+                  </div>
+                </div>
+                <NotificationList items={notes.slice(0, 8)} onRead={markRead} onPatch={patch} onNavigate={close} empty="No notifications yet." />
+                {alerts.length > 0 && (
+                  <>
+                    <h3 className="mt-2 border-t border-zinc-800 px-3 pb-1 pt-3 text-[11px] uppercase tracking-wide text-zinc-500">Board alerts</h3>
+                    <ul>
+                      {alerts.map((a, i) => (
+                        <li key={i}>
+                          <Link href={a.href} onClick={close} className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-800">
+                            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.tone === "rose" ? "bg-rose-500" : "bg-amber-500"}`} />{a.text}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
             )}
           </Popover>
 

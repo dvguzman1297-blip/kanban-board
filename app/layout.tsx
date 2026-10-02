@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/sidebar";
 import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
+import { ToastProvider } from "@/components/toast";
+import type { AppNotification } from "@/lib/notifications";
 import { ThemeInitializer } from "@/components/theme-initializer";
 import { isThemePref } from "@/lib/theme";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
@@ -26,11 +28,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     );
   }
 
-  const [{ data: boards }, { data: cols }, { data: cards }, { data: profile }] = await Promise.all([
+  const [{ data: boards }, { data: cols }, { data: cards }, { data: profile }, { data: notes }] = await Promise.all([
     supabase.from("boards").select("id, user_id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
     supabase.from("columns").select("id, board_id, name, wip_limit"),
     supabase.from("cards").select("column_id, board_id, due_date, archived_at"),
     supabase.from("profiles").select("first_name, full_name, display_name, avatar_url, theme").eq("id", user.id).maybeSingle(),
+    supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30),
   ]);
 
   const boardList = boards ?? [];
@@ -71,15 +74,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeInitializer serverTheme={theme} />
+        <ToastProvider>
         <FocusProvider>
           <div className="flex h-dvh overflow-hidden">
             <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} userId={user.id} />
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} avatarUrl={profile?.avatar_url ?? null} />
+              <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} avatarUrl={profile?.avatar_url ?? null}
+                userId={user.id} initialNotifications={(notes ?? []) as AppNotification[]} />
               <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
             </div>
           </div>
         </FocusProvider>
+        </ToastProvider>
       </body>
     </html>
   );
