@@ -1,5 +1,5 @@
 "use server";
-import nodemailer from "nodemailer";
+import { sendEmail, SENDERS } from "@/lib/resend";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -184,11 +184,9 @@ export async function sendBoardInvite(boardId: string, emailInput: string, roleI
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Enter a valid email address." };
   if (!role) return { ok: false, error: "Choose Editor or Viewer access." };
 
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, "");
   const appUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.APP_URL;
-  if (!gmailUser || !gmailAppPassword || !appUrl) {
-    return { ok: false, error: "Email is not configured. Set GMAIL_USER, GMAIL_APP_PASSWORD, and NEXT_PUBLIC_SITE_URL in Vercel, then redeploy." };
+  if (!process.env.RESEND_API_KEY || !appUrl) {
+    return { ok: false, error: "Email is not configured. Set RESEND_API_KEY and NEXT_PUBLIC_SITE_URL, then redeploy." };
   }
 
   try {
@@ -210,29 +208,22 @@ export async function sendBoardInvite(boardId: string, emailInput: string, roleI
     const safeBoardName = board.name.replace(/[&<>"']/g, (character: string) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[character] ?? character);
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: { user: gmailUser, pass: gmailAppPassword },
+    const sent = await sendEmail({
+      from: SENDERS.invites,
+      to: email,
+      subject: `You're invited to ${board.name} on Deckspace`,
+      html: `<div style="font-family:Arial,sans-serif;color:#18181b"><h1>Deckspace</h1><p>You have been invited to join <strong>${safeBoardName}</strong> as ${role === "editor" ? "an editor" : "a viewer"}.</p><p><a href="${inviteUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Accept invitation</a></p><p>This invitation expires in 7 days.</p></div>`,
+      text: `You have been invited to join ${board.name} on Deckspace as ${role === "editor" ? "an editor" : "a viewer"}. Accept: ${inviteUrl}\nThis invitation expires in 7 days.`,
     });
-    try {
-      await transporter.sendMail({
-        from: `FlowDeck <${gmailUser}>`,
-        to: email,
-        subject: `You're invited to ${board.name} on FlowDeck`,
-        html: `<div style="font-family:Arial,sans-serif;color:#18181b"><h1>FlowDeck</h1><p>You have been invited to join <strong>${safeBoardName}</strong> as ${role === "editor" ? "an editor" : "a viewer"}.</p><p><a href="${inviteUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">Accept invitation</a></p><p>This invitation expires in 7 days.</p></div>`,
-        text: `You have been invited to join ${board.name} on FlowDeck as ${role === "editor" ? "an editor" : "a viewer"}. Accept: ${inviteUrl}\nThis invitation expires in 7 days.`,
-      });
-    } catch (cause) {
+    if (!sent.ok) {
       await supabase.from("board_invites").delete().eq("token", token);
-      throw cause;
+      return { ok: false, error: `Could not send the invitation: ${sent.error}` };
     }
     revalidatePath("/dashboard");
     return { ok: true };
   } catch (cause) {
-    console.error("Failed to send FlowDeck board invitation", cause);
-    return { ok: false, error: "Could not send the invitation. Check the Vercel function logs for details." };
+    console.error("Failed to send Deckspace board invitation", cause);
+    return { ok: false, error: "Could not send the invitation. Check the server logs for details." };
   }
 }
 
