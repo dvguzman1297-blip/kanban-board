@@ -935,7 +935,8 @@ create or replace function public.notify_card_assigned() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare actor uuid := auth.uid();
 begin
-  if new.assignee_id is null or new.assignee_id is not distinct from old.assignee_id or new.assignee_id = actor then
+  if new.assignee_id is null or new.assignee_id = actor
+     or (tg_op = 'UPDATE' and new.assignee_id is not distinct from old.assignee_id) then
     return null;
   end if;
   insert into public.notifications (user_id, type, title, message, metadata)
@@ -947,8 +948,20 @@ begin
 end $$;
 
 drop trigger if exists cards_notify_assigned on public.cards;
-create trigger cards_notify_assigned after update of assignee_id on public.cards
+create trigger cards_notify_assigned after insert or update of assignee_id on public.cards
   for each row execute function public.notify_card_assigned();
+
+-- Cards default to their creator when nobody is picked (fires before cards_validate_assignee).
+create or replace function public.default_card_assignee() returns trigger
+language plpgsql as $$
+begin
+  if new.assignee_id is null then new.assignee_id := new.user_id; end if;
+  return new;
+end $$;
+
+drop trigger if exists cards_default_assignee on public.cards;
+create trigger cards_default_assignee before insert on public.cards
+  for each row execute function public.default_card_assignee();
 
 -- ---------- Realtime ----------
 do $$

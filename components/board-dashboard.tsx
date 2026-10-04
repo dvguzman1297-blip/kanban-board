@@ -106,7 +106,7 @@ export function BoardDashboard({ cards, columns, members, commentAuthors, today 
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-xs text-zinc-500">Created = cards a member added. Completed counts cards currently in Done, credited to the assignee.</p>
+          <p className="mt-3 text-xs text-zinc-500">Created = cards a member added. Completed counts cards currently in Done, credited to the assignee, whoever moved it. New cards default to their creator.</p>
         </Panel>
       </div>
     </div>
