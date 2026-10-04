@@ -243,7 +243,7 @@ export function CardModal({ card, columnColor, attachments, comments, currentUse
         <CardActivity cardId={card.id} />
 
         {templateMsg && <p role={templateMsg.ok ? "status" : "alert"} className={`mt-3 text-xs ${templateMsg.ok ? "text-emerald-300" : "text-rose-400"}`}>{templateMsg.text}</p>}
-        <div className="mt-6 flex items-center justify-between">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 mt-6 flex items-center justify-between border-t border-zinc-800 bg-zinc-900 px-5 py-3">
           {onSaveTemplate && <button type="button" onClick={saveTemplate} title="Save this card as a reusable template"
             className="rounded-lg px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">Save as template</button>}
           {!readOnly && <button onClick={() => confirm("Delete this card?") && (onDelete(), onClose())}
