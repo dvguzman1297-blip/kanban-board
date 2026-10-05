@@ -148,6 +148,17 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   /* ---------- filtering + derived data ---------- */
   const live = useMemo(() => cards.filter((c) => !c.archived_at), [cards]); // archived cards don't count toward stats or WIP
   const archivedCount = cards.length - live.length;
+
+  // The overdue notifications and the bell badge are computed by the server layout, so re-run it shortly after a change
+  // that can resolve (or create) an overdue card: due date, list (Done), archive, delete. Debounced so the write has landed.
+  const overdueSignature = useMemo(() => cards.map((c) => `${c.id}|${c.due_date ?? ""}|${c.column_id}|${c.archived_at ?? ""}`).join(","), [cards]);
+  const lastSignature = useRef(overdueSignature);
+  useEffect(() => {
+    if (lastSignature.current === overdueSignature) return;
+    lastSignature.current = overdueSignature;
+    const t = setTimeout(() => router.refresh(), 1200);
+    return () => clearTimeout(t);
+  }, [overdueSignature, router]);
   const visible = useMemo(() => {
     const ql = q.toLowerCase();
     return cards

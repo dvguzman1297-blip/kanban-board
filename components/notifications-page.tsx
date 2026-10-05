@@ -2,8 +2,8 @@
 import { NotificationList, useNotifications } from "@/components/notifications";
 import type { AppNotification } from "@/lib/notifications";
 
-export function NotificationsPage({ userId, initial }: { userId: string; initial: AppNotification[] }) {
-  const { items, unread, patch, markRead, markAllRead } = useNotifications(userId, initial);
+export function NotificationsPage({ userId, initial, derived }: { userId: string; initial: AppNotification[]; derived: AppNotification[] }) {
+  const { items, unread, patch, markRead, markAllRead } = useNotifications(userId, initial, derived);
   return (
     <div className="h-full overflow-y-auto p-4 md:p-6">
       <div className="mx-auto max-w-2xl">

@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
 import { ToastProvider } from "@/components/toast";
-import type { AppNotification } from "@/lib/notifications";
+import { overdueNotifications, type AppNotification, type OverdueCard } from "@/lib/notifications";
 import { ThemeInitializer } from "@/components/theme-initializer";
 import { isThemePref } from "@/lib/theme";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
@@ -31,7 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [{ data: boards }, { data: cols }, { data: cards }, { data: profile }, { data: notes }] = await Promise.all([
     supabase.from("boards").select("id, user_id, name, is_pinned, is_archived").order("created_at", { ascending: true }),
     supabase.from("columns").select("id, board_id, name, wip_limit"),
-    supabase.from("cards").select("column_id, board_id, due_date, archived_at"),
+    supabase.from("cards").select("id, title, column_id, board_id, due_date, archived_at"),
     supabase.from("profiles").select("first_name, full_name, display_name, avatar_url, theme").eq("id", user.id).maybeSingle(),
     supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30),
   ]);
@@ -58,10 +58,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const doneIds = new Set(colList.filter((c) => isDoneName(c.name)).map((c) => c.id));
   const blockedIds = new Set(colList.filter((c) => isBlockedLike(c.name)).map((c) => c.id));
   const today = toISO(new Date());
-  const overdue = cardList.filter((c) => c.due_date && c.due_date < today && !doneIds.has(c.column_id)).length;
+  const overdueCards = cardList.filter((c) => c.due_date && c.due_date < today && !doneIds.has(c.column_id)) as OverdueCard[];
+  const overdue = overdueCards.length;
   const blocked = cardList.filter((c) => blockedIds.has(c.column_id)).length;
   if (blocked > 0) alerts.unshift({ tone: "rose", href: "/dashboard?view=all", text: `${blocked} blocked card${blocked === 1 ? "" : "s"} need attention` });
-  if (overdue > 0) alerts.unshift({ tone: "amber", href: "/dashboard?view=all", text: `${overdue} overdue card${overdue === 1 ? "" : "s"}` });
+  if (overdue > 0) alerts.unshift({ tone: "amber", kind: "overdue", href: "/dashboard?view=all", text: `${overdue} overdue card${overdue === 1 ? "" : "s"}` });
 
   const metadataFirst = String(user.user_metadata?.first_name ?? "").trim();
   const profileFirst = String(profile?.first_name ?? "").trim();
@@ -80,7 +81,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Sidebar boards={boardList} wip={wip} email={user.email ?? ""} userId={user.id} />
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
               <TopBar boards={boardList} alerts={alerts} email={user.email ?? ""} displayName={displayName} avatarUrl={profile?.avatar_url ?? null}
-                userId={user.id} initialNotifications={(notes ?? []) as AppNotification[]} />
+                userId={user.id} initialNotifications={(notes ?? []) as AppNotification[]} overdueNotes={overdueNotifications(overdueCards, boardName)} />
               <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
             </div>
           </div>

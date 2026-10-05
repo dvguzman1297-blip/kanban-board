@@ -2,15 +2,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AtSign, Check, Loader2, MailPlus, UserCheck, Bell, X } from "lucide-react";
+import { AlarmClock, AtSign, Check, Loader2, MailPlus, UserCheck, Bell, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { acceptBoardInviteAction, declineBoardInviteAction } from "@/app/notification-actions";
 import { useToast } from "@/components/toast";
-import { applyChange, inviteParts, notificationHref, unreadCount, type AppNotification } from "@/lib/notifications";
+import { OVERDUE_PREFIX, applyChange, inviteParts, notificationHref, unreadCount, type AppNotification } from "@/lib/notifications";
 import { timeAgo } from "@/lib/time";
 
 /** Notification state for the signed-in user, kept live through Supabase Realtime. */
-export function useNotifications(userId: string, initial: AppNotification[]) {
+export function useNotifications(userId: string, initial: AppNotification[], derived: AppNotification[] = []) {
   const [items, setItems] = useState(initial);
   const toast = useToast();
   // The bell and the /notifications page both call this hook. Supabase hands back the SAME channel for a repeated topic,
@@ -35,6 +35,7 @@ export function useNotifications(userId: string, initial: AppNotification[]) {
 
   const patch = (id: string, change: Partial<AppNotification>) => setItems((cur) => cur.map((n) => (n.id === id ? { ...n, ...change } : n)));
   const markRead = (id: string) => {
+    if (id.startsWith(OVERDUE_PREFIX)) return; // derived, nothing to persist
     patch(id, { is_read: true });
     void createClient().from("notifications").update({ is_read: true }).eq("id", id);
   };
@@ -42,10 +43,10 @@ export function useNotifications(userId: string, initial: AppNotification[]) {
     setItems((cur) => cur.map((n) => ({ ...n, is_read: true })));
     void createClient().from("notifications").update({ is_read: true }).eq("user_id", userId).eq("is_read", false);
   };
-  return { items, unread: unreadCount(items), patch, markRead, markAllRead };
+  return { items: [...items, ...derived], unread: unreadCount(items), patch, markRead, markAllRead };
 }
 
-const ICON = { board_invite: MailPlus, card_assigned: UserCheck, comment_mention: AtSign, system: Bell } as const;
+const ICON = { board_invite: MailPlus, card_assigned: UserCheck, card_overdue: AlarmClock, comment_mention: AtSign, system: Bell } as const;
 
 export function NotificationItem({ n, onRead, onPatch, onNavigate }: {
   n: AppNotification; onRead: (id: string) => void; onPatch: (id: string, c: Partial<AppNotification>) => void; onNavigate?: () => void;

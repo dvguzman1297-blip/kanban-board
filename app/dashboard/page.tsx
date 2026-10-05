@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
-  ArrowRight, Ban, CheckCircle2, Clock, Flag, Gauge, Inbox, LayoutDashboard, ListTodo, Plus, TrendingUp, Zap,
+  ArrowRight, Ban, CheckCircle2, Clock, Flag, Gauge, Inbox, LayoutDashboard, ListTodo, Pencil, Plus, TrendingUp, Zap,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PALETTE, columnColor } from "@/lib/colors";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
 import { timeAgo } from "@/lib/time";
+import { describeEvent } from "@/lib/card-events";
 import { PinButton } from "@/components/pin-button";
 import { NewBoardButton } from "@/components/new-board-button";
 import { FocusWidget } from "@/components/focus-widget";
@@ -43,11 +44,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  const [{ data: boardsRaw }, { data: colsRaw }, { data: cardsRaw }, { data: actsRaw }, { data: profile }] = await Promise.all([
+  const [{ data: boardsRaw }, { data: colsRaw }, { data: cardsRaw }, { data: actsRaw }, { data: eventsRaw }, { data: profile }] = await Promise.all([
     supabase.from("boards").select("*").order("created_at"),
     supabase.from("columns").select("*").order("order_index"),
     supabase.from("cards").select("*"),
     supabase.from("activity").select("*").order("created_at", { ascending: false }).limit(200),
+    // Edits (due date, assignee, priority, tags, subtasks) live in the card audit trail; moves/creations come from `activity`.
+    supabase.from("card_events").select("id, card_id, board_id, kind, detail, created_at").not("kind", "in", "(created,moved)").order("created_at", { ascending: false }).limit(100),
     user ? supabase.from("profiles").select("first_name, full_name, default_board_id").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
 
@@ -64,7 +67,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const columns = ((colsRaw ?? []) as Column[]).filter((c) => activeIds.has(c.board_id));
   const colById = new Map(columns.map((c) => [c.id, c]));
   const cards = ((cardsRaw ?? []) as Card[]).filter((c) => colById.has(c.column_id) && !c.archived_at);
-  const acts = (actsRaw ?? []) as Act[]; // empty until migration 005 has been run
+  const cardTitleById = new Map(((cardsRaw ?? []) as Card[]).map((c) => [c.id, c.title]));
+  const edits: Act[] = ((eventsRaw ?? []) as { id: string; card_id: string; board_id: string; kind: string; detail: Record<string, string | null>; created_at: string }[])
+    .map((e) => ({ id: `ev:${e.id}`, board_id: e.board_id, card_id: e.card_id, card_title: cardTitleById.get(e.card_id) ?? null,
+      kind: `edit:${e.kind}`, from_column: null, to_column: describeEvent(e.kind, e.detail), created_at: e.created_at }));
+  const acts = [...((actsRaw ?? []) as Act[]), ...edits] // activity is empty until migration 005 has been run
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   const today = toISO(new Date());
   const weekAgo = Date.now() - 7 * 864e5;
@@ -117,6 +125,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const describe = (a: Act) => {
     const board = boardById.get(a.board_id!)?.name ?? "a board";
     const t = `“${a.card_title ?? "Untitled"}”`;
+    if (a.kind.startsWith("edit:")) return { icon: <Pencil className="h-4 w-4" />, tone: TONE.indigo, text: `Updated ${t} on ${board}: ${a.to_column}` };
     switch (a.kind) {
       case "card_completed": return { icon: <CheckCircle2 className="h-4 w-4" />, tone: TONE.emerald, text: `Completed ${t} on ${board}` };
       case "card_moved": return { icon: <ArrowRight className="h-4 w-4" />, tone: TONE.indigo, text: `Moved ${t} from ${a.from_column} to ${a.to_column} on ${board}` };
@@ -209,7 +218,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                     const d = describe(a);
                     return (
                       <li key={a.id}>
-                        <Link href={`/board/${a.board_id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-800/50">
+                        <Link href={a.card_id ? `/board/${a.board_id}?card=${a.card_id}` : `/board/${a.board_id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-zinc-800/50">
                           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${d.tone}`}>{d.icon}</span>
                           <span className="min-w-0 flex-1 truncate">{d.text}</span>
                           <span className="shrink-0 text-xs text-zinc-500">{timeAgo(a.created_at)}</span>

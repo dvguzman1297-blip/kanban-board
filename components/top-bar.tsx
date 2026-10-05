@@ -10,7 +10,7 @@ import { NotificationList, useNotifications } from "@/components/notifications";
 import type { AppNotification } from "@/lib/notifications";
 
 type Board = { id: string; name: string; is_archived: boolean };
-export type Alert = { text: string; href: string; tone: "rose" | "amber" };
+export type Alert = { text: string; href: string; tone: "rose" | "amber"; kind?: "overdue" };
 
 function Popover({ button, children, wide = false }: { wide?: boolean; button: (open: boolean, toggle: () => void) => React.ReactNode; children: (close: () => void) => React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -35,9 +35,10 @@ function Popover({ button, children, wide = false }: { wide?: boolean; button: (
   );
 }
 
-export function TopBar({ boards, alerts, email, displayName, avatarUrl, userId, initialNotifications }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string; avatarUrl: string | null; userId: string; initialNotifications: AppNotification[] }) {
-  const { items: notes, unread, patch, markRead, markAllRead } = useNotifications(userId, initialNotifications);
-  const badge = unread + alerts.length;
+export function TopBar({ boards, alerts, email, displayName, avatarUrl, userId, initialNotifications, overdueNotes }: { boards: Board[]; alerts: Alert[]; email: string; displayName: string; avatarUrl: string | null; userId: string; initialNotifications: AppNotification[]; overdueNotes: AppNotification[] }) {
+  const { items: notes, unread, patch, markRead, markAllRead } = useNotifications(userId, initialNotifications, overdueNotes);
+  // Overdue cards are counted individually (they are listed above), so their summary alert is not counted again.
+  const badge = unread + overdueNotes.length + alerts.filter((a) => a.kind !== "overdue").length;
   const [palette, setPalette] = useState(false);
   const [quick, setQuick] = useState(false);
   const active = boards.filter((b) => !b.is_archived);

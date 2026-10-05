@@ -86,7 +86,7 @@ export function Sidebar({ boards, wip, email, userId }: { boards: B[]; wip: Reco
         mobileOpen ? "translate-x-0" : "-translate-x-full"} ${slim ? "md:w-14 md:px-2" : "md:w-64"}`}>
 
         <div className={`mb-4 flex items-center ${slim ? "flex-col gap-2" : "justify-between px-2"}`}>
-          {slim ? <AppLogo className="h-7 w-7" /> : (
+          {slim ? <Link href="/dashboard?view=all" title="Home" aria-label="Home"><AppLogo className="h-7 w-7" /></Link> : (
             <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold tracking-tight">
               <AppLogo className="h-6 w-6" /> FlowDeck
             </Link>

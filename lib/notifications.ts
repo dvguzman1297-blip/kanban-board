@@ -1,4 +1,4 @@
-export type NotificationType = "board_invite" | "card_assigned" | "comment_mention" | "system";
+export type NotificationType = "board_invite" | "card_assigned" | "card_overdue" | "comment_mention" | "system";
 export type InviteStatus = "accepted" | "declined" | "cancelled";
 
 export type NotificationMeta = {
@@ -23,7 +23,7 @@ export const unreadCount = (items: AppNotification[]) => items.filter((n) => !n.
 /** Where clicking a notification should go (invites have their own buttons). */
 export function notificationHref(n: AppNotification): string | null {
   const m = n.metadata;
-  if (n.type === "card_assigned" && m.board_id) return m.card_id ? `/board/${m.board_id}?card=${m.card_id}` : `/board/${m.board_id}`;
+  if ((n.type === "card_assigned" || n.type === "card_overdue") && m.board_id) return m.card_id ? `/board/${m.board_id}?card=${m.card_id}` : `/board/${m.board_id}`;
   return null;
 }
 
@@ -34,3 +34,19 @@ export function applyChange(items: AppNotification[], event: "INSERT" | "UPDATE"
   const next = exists ? items.map((n) => (n.id === row.id ? { ...n, ...row } : n)) : [row as AppNotification, ...items];
   return next.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
+
+export type OverdueCard = { id: string; board_id: string; title: string; due_date: string };
+
+/**
+ * Overdue cards shown as notifications. They aren't stored: they're derived from the cards on every load, so they
+ * disappear once a card is done, rescheduled or archived. `is_read` is true so they never inflate the unread badge.
+ */
+export function overdueNotifications(cards: OverdueCard[], boardName: Record<string, string>): AppNotification[] {
+  return [...cards].sort((a, b) => a.due_date.localeCompare(b.due_date)).map((c) => ({
+    id: `${OVERDUE_PREFIX}${c.id}`, user_id: "", type: "card_overdue" as const, title: "Card overdue",
+    message: `“${c.title}” was due ${c.due_date}${boardName[c.board_id] ? ` · ${boardName[c.board_id]}` : ""}`,
+    metadata: { board_id: c.board_id, card_id: c.id, card_title: c.title },
+    is_read: true, created_at: `${c.due_date}T00:00:00.000Z`,
+  }));
+}
+export const OVERDUE_PREFIX = "overdue:";
