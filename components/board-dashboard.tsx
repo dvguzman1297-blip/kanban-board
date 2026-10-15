@@ -73,7 +73,7 @@ export function BoardDashboard({ cards, columns, members, commentAuthors, today 
 
         <div className="grid gap-4 md:grid-cols-2">
           <Panel title="Cards per list">
-            <Bars data={s.perList} empty="No cards on this board yet." tone={(d) => { const i = columns.findIndex((c) => c.id === d.key); return PALETTE[columnColor(columns[i]?.name ?? "", i)].dot; }} />
+            <Bars data={s.perList} empty="No cards on this board yet." tone={(d) => { const i = columns.findIndex((c) => c.id === d.key); return PALETTE[columnColor(columns[i]?.name ?? "", i, columns[i]?.color)].dot; }} />
           </Panel>
           <Panel title="Cards per due date"><Bars data={s.perDue} empty="No cards with due dates yet." /></Panel>
           <Panel title="Cards per member"><Bars data={memberBars} empty="No cards are assigned yet — assign a card from its edit dialog." tone={(d) => (d.key === "none" ? "bg-zinc-600" : "bg-indigo-500")} /></Panel>

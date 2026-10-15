@@ -40,3 +40,14 @@ html.light {
   .fd-fade-in { animation: none; }
   .animate-pulse { animation: none; }
 }
+
+/* Native selects drawn to match the app: no OS arrow, one consistent chevron. */
+.fd-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1rem;
+}

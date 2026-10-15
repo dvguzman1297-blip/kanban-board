@@ -16,13 +16,24 @@ export type ColorKey = keyof typeof PALETTE;
 export const COLOR_KEYS = Object.keys(PALETTE) as ColorKey[];
 
 // Default colour per status column (matched by name), then cycles for custom columns.
+// Red is reserved for Blocked and green for Done, so names from the board templates get calm colours instead.
 const BY_NAME: Record<string, ColorKey> = {
   backlog: "slate", "up next": "sky", "in progress": "amber", blocked: "rose", done: "emerald",
+  // template columns
+  ideas: "slate", reported: "slate", applied: "slate", new: "slate", brainstorm: "slate", "before day 1": "slate", monday: "slate",
+  "to do": "sky", triaged: "sky", planned: "sky", planning: "sky", screening: "sky", "week 1": "sky", tuesday: "sky",
+  doing: "amber", writing: "amber", creating: "amber", interview: "amber", building: "amber",
+  review: "violet", "in review": "violet", testing: "violet", wednesday: "violet",
+  scheduled: "teal", booked: "teal", offer: "teal", live: "teal", "first month": "teal", thursday: "teal",
+  waiting: "orange", friday: "orange",
 };
 const CYCLE: ColorKey[] = ["slate", "sky", "amber", "rose", "emerald", "violet", "teal", "orange"];
 
-export const columnColor = (name: string, index: number): ColorKey =>
-  BY_NAME[name.trim().toLowerCase()] ?? CYCLE[index % CYCLE.length];
+export const isColorKey = (v: unknown): v is ColorKey => typeof v === "string" && Object.prototype.hasOwnProperty.call(PALETTE, v);
+
+/** A colour the user picked wins; otherwise it comes from the column's name, then its position. */
+export const columnColor = (name: string, index: number, saved?: string | null): ColorKey =>
+  (isColorKey(saved) ? saved : null) ?? BY_NAME[name.trim().toLowerCase()] ?? CYCLE[index % CYCLE.length];
 
 export const effectiveColor = (cardColor: string | null | undefined, fallback: ColorKey): ColorKey =>
   cardColor && cardColor in PALETTE ? (cardColor as ColorKey) : fallback;

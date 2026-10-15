@@ -1,4 +1,7 @@
-export type Column = { id: string; board_id: string; name: string; order_index: number; wip_limit: number | null };
+export type Column = {
+  id: string; board_id: string; name: string; order_index: number; wip_limit: number | null;
+  color?: string | null; // palette key chosen by a board editor; null/undefined = automatic
+};
 export type Subtask = { id: string; title: string; done: boolean };
 export type Card = {
   id: string; column_id: string; board_id: string; title: string; description: string | null;

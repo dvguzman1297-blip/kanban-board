@@ -160,7 +160,7 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
           </form>
         </section>
       )}
-      <button onClick={() => setOpen((o) => !o)} aria-label={open ? "Close AI chat" : "Open AI chat"} aria-expanded={open}
+      <button onClick={() => setOpen((o) => !o)} aria-label={open ? "Close AI chat" : "Open AI chat"} aria-expanded={open} title={open ? "Close AI chat" : "Ask AI about your boards"}
         className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-black/40 transition hover:scale-105 hover:bg-indigo-500">
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
       </button>

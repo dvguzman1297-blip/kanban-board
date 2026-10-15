@@ -41,7 +41,7 @@ export function BoardSettings({ boardId, days }: { boardId: string; days: number
     <div ref={ref} className="relative">
       <button onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} title="Board settings" aria-label="Board settings"
         className="flex h-9 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-sm text-zinc-300 hover:border-zinc-700">
-        <Settings2 className="h-4 w-4" />
+        <Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Settings</span>
       </button>
       {open && (
         <div role="dialog" aria-label="Board settings" className="absolute right-0 top-11 z-40 w-72 rounded-xl border border-zinc-800 bg-zinc-900 p-4 shadow-xl">

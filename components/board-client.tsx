@@ -1,21 +1,26 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  DndContext, DragOverlay, MouseSensor, TouchSensor, KeyboardSensor, closestCorners, useSensor, useSensors, useDroppable,
-  type DragEndEvent, type DragOverEvent, type DragStartEvent,
+  DndContext, DragOverlay, MouseSensor, TouchSensor, KeyboardSensor, closestCorners, closestCenter, useSensor, useSensors, useDroppable,
+  type CollisionDetection, type DragEndEvent, type DragOverEvent, type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, horizontalListSortingStrategy, verticalListSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, Search, AlertTriangle, Pencil, ChevronsLeft, ChevronsRight, ChevronDown, TrendingUp, Ban, Clock,
-  Columns3, List, CalendarDays, CalendarRange, LayoutDashboard, Check, X, Eye, EyeOff, Tags as TagsIcon, CheckSquare, Archive, LayoutTemplate, Image as ImageIcon, ImageOff, CheckCircle2, Inbox,
+  Plus, Search, AlertTriangle, Pencil,  ChevronsRight, ChevronDown, TrendingUp, Ban, Clock,
+  Columns3, List, CalendarDays, CalendarRange, LayoutDashboard, Check, X,  EyeOff, Tags as TagsIcon, CheckSquare, Archive, LayoutTemplate, Image as ImageIcon, ImageOff,   GripVertical,
 } from "lucide-react";
 import { setCardTags } from "@/app/card-extras-actions";
 import { useRouter } from "next/navigation";
 import { createCard, moveCard, updateCard, deleteCard, renameBoard } from "@/app/actions";
 import { CardModal } from "@/components/card-modal";
 import { InviteMembersButton } from "@/components/invite-members-button";
+import { AddColumn, ColumnMenu, type ColumnEdit } from "@/components/column-menu";
+import { FiltersMenu } from "@/components/filters-menu";
+import { reorderColumns } from "@/app/column-actions";
+import { applyColumnOrder } from "@/lib/column-rules";
+import { useToast } from "@/components/toast";
 import { CardView } from "@/components/card-view";
 import { ListView, CalendarView } from "@/components/board-views";
 import { TimelineView } from "@/components/timeline-view";
@@ -64,7 +69,7 @@ const wipTitle = (c: Column, n: number) =>
   : n > c.wip_limit ? `WIP limit exceeded: ${n} cards, limit is ${c.wip_limit}`
   : n === c.wip_limit ? `At WIP limit (${c.wip_limit}) — finish something before pulling more` : `${n} of ${c.wip_limit} slots used`;
 
-export function BoardClient({ board, initialColumns, initialCards, initialAttachments, initialComments, members, initialTags, initialCardTags, initialTemplates, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
+export function BoardClient({ board, initialColumns: serverColumns, initialCards, initialAttachments, initialComments, members, initialTags, initialCardTags, initialTemplates, currentUser, canInvite, canEdit = true, canAdmin = true, initialOpenCardId }: {
   board: { id: string; name: string; description: string | null; auto_archive_days?: number | null };
   initialColumns: Column[]; initialCards: Card[]; initialAttachments: Attachment[]; initialComments: CardComment[]; members: Member[]; initialTags: Tag[]; initialCardTags: Record<string, string[]>; initialTemplates: CardTemplate[];
   currentUser: { id: string; name: string }; canInvite: boolean; canEdit?: boolean; canAdmin?: boolean; initialOpenCardId?: string | null;
@@ -75,6 +80,14 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   const [cardTags, setCardTagsState] = useState<Record<string, string[]>>(initialCardTags);
   const [tagsOpen, setTagsOpen] = useState(false);
   const router = useRouter();
+  const toast = useToast();
+  // Column order: the server's order, unless a drag just reordered them (the override is dropped once fresh server data arrives).
+  const [colOrder, setColOrder] = useState<{ base: Column[]; ids: string[] } | null>(null);
+  const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
+  const initialColumns = useMemo(
+    () => applyColumnOrder(serverColumns, colOrder && colOrder.base === serverColumns ? colOrder.ids : null),
+    [serverColumns, colOrder],
+  );
   const [templates, setTemplates] = useState<CardTemplate[]>(initialTemplates);
   const [focusedId, setFocusedId] = useState<string | null>(null);   // keyboard cursor
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -123,6 +136,11 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   const toggleIn = (set: Set<string>, id: string) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); return n; };
 
   const colColors = useMemo(() => {
+    const m: Record<string, ColorKey> = {};
+    initialColumns.forEach((c, i) => (m[c.id] = columnColor(c.name, i, c.color)));
+    return m;
+  }, [initialColumns]);
+  const autoColors = useMemo(() => {
     const m: Record<string, ColorKey> = {};
     initialColumns.forEach((c, i) => (m[c.id] = columnColor(c.name, i)));
     return m;
@@ -216,6 +234,12 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+  // Column drags only see other columns; card drags never see columns' sortable handles.
+  const collision: CollisionDetection = (args) => {
+    const draggingColumn = String(args.active.id).startsWith(COL_PREFIX);
+    const droppableContainers = args.droppableContainers.filter((c) => String(c.id).startsWith(COL_PREFIX) === draggingColumn);
+    return (draggingColumn ? closestCenter : closestCorners)({ ...args, droppableContainers });
+  };
   const dragStartCards = useRef<Card[]>([]);
   const activeCard = cards.find((c) => c.id === activeId) ?? null;
   const editingCard = cards.find((c) => c.id === editingId) ?? null;
@@ -228,11 +252,29 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
     return card ? { col: card.column_id, lane: lanesOn ? laneKeyOf(card, groupBy) : undefined } : null;
   };
 
-  const onDragStart = (e: DragStartEvent) => { dragStartCards.current = cards; setActiveId(String(e.active.id)); };
+  const onDragStart = (e: DragStartEvent) => {
+    if (String(e.active.id).startsWith(COL_PREFIX)) { setActiveColumnId(String(e.active.id).slice(COL_PREFIX.length)); return; }
+    dragStartCards.current = cards; setActiveId(String(e.active.id));
+  };
+
+  const onColumnDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveColumnId(null);
+    if (!over || active.id === over.id) return;
+    const ids = initialColumns.map((c) => c.id);
+    const from = ids.indexOf(String(active.id).slice(COL_PREFIX.length));
+    const to = ids.indexOf(String(over.id).slice(COL_PREFIX.length));
+    if (from < 0 || to < 0) return;
+    const next = arrayMove(ids, from, to);
+    setColOrder({ base: serverColumns, ids: next }); // show the new order immediately
+    startTransition(async () => {
+      const result = await reorderColumns(board.id, next);
+      if ("error" in result) { setColOrder(null); toast(result.error, "error"); } else router.refresh();
+    });
+  };
 
   const onDragOver = (e: DragOverEvent) => {
     const { active, over } = e;
-    if (!over) return;
+    if (!over || String(active.id).startsWith(COL_PREFIX)) return;
     const t = parseId(String(over.id));
     const cur = cards.find((c) => c.id === active.id);
     if (!t || !cur) return;
@@ -242,6 +284,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   };
 
   const onDragEnd = (e: DragEndEvent) => {
+    if (String(e.active.id).startsWith(COL_PREFIX)) { onColumnDragEnd(e); return; }
     setActiveId(null);
     const { active, over } = e;
     const original = dragStartCards.current.find((c) => c.id === active.id);
@@ -452,12 +495,13 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
   };
 
   const cardProps = { attByCard, previews, canEdit, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }) };
+  const editFor = (): ColumnEdit | undefined => (canEdit ? { boardId: board.id, onChanged: () => router.refresh() } : undefined);
   const tplVars = {
     "--tpl-sm": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(78vw,1fr)")).join(" "),
-    "--tpl-md": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(11rem,1fr)")).join(" "),
+    "--tpl-md": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(14rem,1fr)")).join(" "),
   } as React.CSSProperties;
   const gridCls = "grid gap-3 md:gap-4 [grid-template-columns:var(--tpl-sm)] md:[grid-template-columns:var(--tpl-md)]";
-  const ctl = "h-9 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-sm capitalize outline-none focus:border-indigo-500";
+  const ctl = "fd-select h-9 rounded-lg border border-zinc-800 bg-zinc-900 px-2 text-sm capitalize outline-none focus:border-indigo-500";
   const views: [View, string, React.ReactNode][] = [
     ["kanban", "Board View", <Columns3 key="k" className="h-4 w-4" />],
     ["list", "List", <List key="l" className="h-4 w-4" />],
@@ -495,7 +539,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 
           {/* Quick stats */}
           <div className="hidden flex-wrap items-center gap-2 text-xs sm:flex">
-            <span title="Cards moved to Done in the last 7 days" className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-emerald-300">
+            <span title="Cards moved to Done in the last 7 days" className={`flex items-center gap-1 rounded-full px-2.5 py-1 ${stats.velocity > 0 ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-800 text-zinc-400"}`}>
               <TrendingUp className="h-3.5 w-3.5" /> Velocity {stats.velocity}/wk
             </span>
             {stats.blocked > 0 && (
@@ -521,17 +565,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="relative w-full sm:w-56">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cards…"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search this board's cards…"
               className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-900 pl-8 pr-3 text-sm outline-none focus:border-indigo-500" />
           </div>
-          <select value={priority} onChange={(e) => setPriority(e.target.value)} className={ctl}>
-            <option value="all">Priority: all</option>
-            {["low", "medium", "high", "urgent"].map((o) => <option key={o} value={o}>Priority: {o}</option>)}
-          </select>
-          <select value={energy} onChange={(e) => setEnergy(e.target.value)} className={ctl}>
-            <option value="all">Energy: all</option>
-            {["low", "medium", "high"].map((o) => <option key={o} value={o}>Energy: {o}</option>)}
-          </select>
+          <FiltersMenu priority={priority} energy={energy} onPriority={setPriority} onEnergy={setEnergy} />
           {canEdit && view !== "dashboard" && (
             <button onClick={() => { setSelectMode((m) => !m); if (selectMode) setSelectedIds(new Set()); }} aria-pressed={selectMode} title="Select multiple cards (or Shift+click)"
               className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-sm ${selectMode ? "border-indigo-500 bg-indigo-500/15 text-indigo-200" : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100"}`}>
@@ -552,10 +589,10 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
                 <option value="energy">Group: energy</option>
                 <option value="color">Group: colour</option>
               </select>
-              <button onClick={() => setPreviews((p) => !p)} title={previews ? "Hide image previews" : "Show image previews"}
-                className="flex h-9 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-sm text-zinc-400 hover:text-zinc-100">
+              <button onClick={() => setPreviews((p) => !p)} aria-pressed={previews} title={previews ? "Image previews on (click to hide)" : "Image previews off (click to show)"}
+                aria-label="Toggle image previews"
+                className={`flex h-9 w-9 items-center justify-center rounded-lg border ${previews ? "border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white" : "border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-zinc-200"}`}>
                 {previews ? <ImageIcon className="h-4 w-4" /> : <ImageOff className="h-4 w-4" />}
-                <span className="hidden sm:inline">Previews {previews ? "on" : "off"}</span>
               </button>
             </>
           )}
@@ -572,21 +609,29 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
         onChange={(id, patch) => saveCard(id, patch)} exportData={{ cards, members, boardName: name }} />}
 
       {view === "kanban" && (
-        <DndContext id={`board-${board.id}`} sensors={sensors} collisionDetection={closestCorners}
+        <DndContext id={`board-${board.id}`} sensors={sensors} collisionDetection={collision}
           onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}
-          onDragCancel={() => { setActiveId(null); setCards(dragStartCards.current); }}>
+          onDragCancel={() => { if (activeColumnId) { setActiveColumnId(null); return; } setActiveId(null); setCards(dragStartCards.current); }}>
+          {cards.length === 0 && canEdit && (
+            <p className="mx-4 mt-4 rounded-xl border border-dashed border-zinc-700 px-4 py-3 text-sm text-zinc-400 md:mx-6">
+              This board is empty. Choose <strong className="font-medium text-zinc-200">Add card</strong> under any column to start, or use <strong className="font-medium text-zinc-200">⋯</strong> on a column to rename it or set a WIP limit.
+            </p>
+          )}
           {!lanesOn ? (
-            <div className="flex flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4 md:gap-4 md:p-6">
+            <div className="flex flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4 pb-24 md:gap-4 md:p-6 md:pb-24">
+              <SortableContext items={initialColumns.map((c) => COL_PREFIX + c.id)} strategy={horizontalListSortingStrategy}>
               {initialColumns.map((col) => (
-                <KanbanColumn key={col.id} column={col} colorKey={colColors[col.id]} cards={byColumn[col.id] ?? []}
+                <KanbanColumn key={col.id} edit={editFor()} column={col} colorKey={colColors[col.id]} autoColor={autoColors[col.id]} cards={byColumn[col.id] ?? []}
                   totalCount={live.filter((c) => c.column_id === col.id).length}
                   collapsed={collapsedCols.has(col.id)} onToggleCollapse={() => setCollapsedCols((s) => toggleIn(s, col.id))}
                   hiddenCount={hiddenCount(col.id)} onToggleHidden={() => setHiddenCols((s) => toggleIn(s, col.id))}
                   onAdd={(title) => addCard(col.id, title)} {...cardProps} />
               ))}
+              </SortableContext>
+              {canEdit && <AddColumn boardId={board.id} count={initialColumns.length} onChanged={() => router.refresh()} />}
             </div>
           ) : (
-            <div className="flex-1 overflow-auto p-4 md:p-6">
+            <div className="flex-1 overflow-auto p-4 pb-24 md:p-6 md:pb-24">
               <div className={`${gridCls} sticky top-0 z-10 mb-3 bg-zinc-950 pb-2`} style={tplVars}>
                 {initialColumns.map((col) => {
                   const n = live.filter((c) => c.column_id === col.id).length;
@@ -598,8 +643,8 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
                     </button>
                   ) : (
                     <div key={col.id} className={`rounded-xl border ${st === "over" ? "border-rose-500/60 bg-rose-500/10" : st === "at" ? "border-amber-500/60 bg-amber-500/5" : "border-zinc-800 bg-zinc-900/60"}`}>
-                      <ColumnHeader column={col} colorKey={colColors[col.id]} totalCount={n} onToggle={() => setCollapsedCols((s) => toggleIn(s, col.id))}
-                        hidden={hiddenCols.has(col.id)} onToggleHidden={() => setHiddenCols((s) => toggleIn(s, col.id))} />
+                      <ColumnHeader column={col} colorKey={colColors[col.id]} autoColor={autoColors[col.id]} totalCount={n} onToggle={() => setCollapsedCols((s) => toggleIn(s, col.id))}
+                        hidden={hiddenCols.has(col.id)} onToggleHidden={() => setHiddenCols((s) => toggleIn(s, col.id))} edit={editFor()} />
                     </div>
                   );
                 })}
@@ -672,36 +717,40 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
 }
 
 /* ====================== columns ====================== */
+const COL_PREFIX = "col|"; // sortable id of a column, to tell it apart from card and column-drop ids
 type CardActions = {
   attByCard: Record<string, Attachment[]>; previews: boolean; canEdit: boolean;
   onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
 };
 
-function ColumnHeader({ column, colorKey, totalCount, onToggle, hidden, onToggleHidden }:
-  { column: Column; colorKey: ColorKey; totalCount: number; onToggle: () => void; hidden?: boolean; onToggleHidden?: () => void }) {
-  const st = wipState(column, totalCount);
+type ColumnHandle = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners"> & { setActivator: (el: HTMLElement | null) => void };
+
+function ColumnGrip({ name, handle }: { name: string; handle: ColumnHandle }) {
+  const { attributes, listeners, setActivator } = handle;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
+    <button ref={setActivator} {...attributes} {...listeners} title="Drag to reorder column" aria-label={`Reorder ${name}`}
+      className="-ml-1 shrink-0 cursor-grab touch-none rounded p-0.5 text-zinc-500 hover:text-zinc-200 active:cursor-grabbing md:opacity-0 md:focus-visible:opacity-100 md:group-hover/col:opacity-100"><GripVertical className="h-4 w-4" /></button>
+  );
+}
+
+function ColumnHeader({ column, colorKey, autoColor, totalCount, onToggle, hidden, onToggleHidden, edit, handle }:
+  { column: Column; colorKey: ColorKey; autoColor: ColorKey; totalCount: number; onToggle: () => void; hidden?: boolean; onToggleHidden?: () => void; edit?: ColumnEdit; handle?: ColumnHandle }) {
+  const st = wipState(column, totalCount);
+  const done = isDoneName(column.name);
+  return (
+    <div className="group/col flex items-center gap-2 px-3 py-3">
+      {handle && <ColumnGrip name={column.name} handle={handle} />}
       <h2 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${PALETTE[colorKey].dot}`} />
-        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{column.name}</span>
+        <span className="min-w-0 truncate" title={column.name}>{column.name}</span>
       </h2>
-      <div className="flex shrink-0 items-center gap-1">
-        <span title={wipTitle(column, totalCount)} className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
-          st === "over" ? "bg-rose-500/20 text-rose-300" : st === "at" ? "bg-amber-500/20 text-amber-300" : "bg-zinc-800 text-zinc-400"}`}>
-          {st !== "ok" && <AlertTriangle className="h-3 w-3" />}
-          {totalCount}{column.wip_limit !== null && ` / ${column.wip_limit}`}
-        </span>
-        {onToggleHidden && isDoneName(column.name) && (
-          <button onClick={onToggleHidden} aria-pressed={hidden} title={hidden ? "Show completed / archived cards" : "Hide completed / archived cards"}
-            aria-label={hidden ? "Show completed and archived cards" : "Hide completed and archived cards"}
-            className={`rounded p-1 hover:bg-zinc-800 ${hidden ? "text-indigo-300" : "text-zinc-500 hover:text-zinc-200"}`}>
-            {hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
-        )}
-        <button onClick={onToggle} title="Collapse column" aria-label={`Collapse ${column.name}`}
-          className="hidden rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 md:block"><ChevronsLeft className="h-4 w-4" /></button>
-      </div>
+      {done && hidden && <EyeOff className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-label="Completed cards are hidden" />}
+      <span title={wipTitle(column, totalCount)} className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+        st === "over" ? "bg-rose-500/20 text-rose-300" : st === "at" ? "bg-amber-500/20 text-amber-300" : "bg-zinc-800 text-zinc-300"}`}>
+        {st !== "ok" && <AlertTriangle className="h-3 w-3" />}
+        {totalCount}{column.wip_limit !== null && ` / ${column.wip_limit}`}
+      </span>
+      <ColumnMenu column={column} edit={edit} autoColor={autoColor} onCollapse={onToggle} completedHidden={hidden} onToggleCompleted={done ? onToggleHidden : undefined} />
     </div>
   );
 }
@@ -725,34 +774,29 @@ function AddCard({ onAdd, columnId }: { onAdd: (title: string) => Promise<void>;
   );
 }
 
-function EmptyDrop({ name, filtered, isOver }: { name: string; filtered: boolean; isOver: boolean }) {
-  const n = name.trim().toLowerCase();
-  const msg = filtered ? "No cards match your filters"
-    : n === "blocked" ? "No blocked tasks — all clear!"
-    : n === "done" ? "Finished work lands here"
-    : n === "backlog" ? "Nothing queued yet — add an idea"
-    : n === "in progress" ? "Drag a card here to start"
-    : n === "up next" ? "Pull your next task here" : "Drop cards here";
-  const Icon = filtered ? Search : n === "blocked" ? CheckCircle2 : Inbox;
+function EmptyDrop({ filtered, isOver }: { filtered: boolean; isOver: boolean }) {
   return (
-    <div className={`flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-3 py-8 text-center text-xs ${
-      isOver ? "border-indigo-500/60 text-indigo-300" : "border-zinc-700/70 text-zinc-500"}`}>
-      <Icon className="h-5 w-5 opacity-70" />{msg}
+    <div className={`rounded-lg border border-dashed px-3 py-4 text-center text-xs transition-colors ${
+      isOver ? "border-indigo-500/60 bg-indigo-500/5 text-indigo-300" : "border-transparent text-zinc-400"}`}>
+      {filtered ? "No cards match your filters" : "Drop here"}
     </div>
   );
 }
 
-function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggleCollapse, hiddenCount = 0, onToggleHidden, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
-  column: Column; colorKey: ColorKey; cards: Card[]; totalCount: number; collapsed: boolean;
+function KanbanColumn({ column, colorKey, autoColor, cards, totalCount, collapsed, onToggleCollapse, hiddenCount = 0, onToggleHidden, onAdd, edit, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
+  column: Column; colorKey: ColorKey; autoColor: ColorKey; cards: Card[]; totalCount: number; collapsed: boolean; edit?: ColumnEdit;
   onToggleCollapse: () => void; hiddenCount?: number; onToggleHidden?: () => void; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id });
+  const sortable = useSortable({ id: COL_PREFIX + column.id, disabled: !edit });
+  const setNodeRef = (el: HTMLElement | null) => { setDropRef(el); sortable.setNodeRef(el); };
+  const dragStyle = { transform: CSS.Translate.toString(sortable.transform), transition: sortable.transition, opacity: sortable.isDragging ? 0.6 : undefined };
   const st = wipState(column, totalCount);
 
   // Collapsed: thin vertical ribbon (still a drop target)
   if (collapsed) {
     return (
-      <section ref={setNodeRef} onClick={onToggleCollapse} title={`Expand ${column.name}`}
+      <section ref={setNodeRef} style={dragStyle} onClick={onToggleCollapse} title={`Expand ${column.name}`}
         className={`flex w-11 shrink-0 cursor-pointer flex-col items-center gap-3 rounded-xl border bg-zinc-900/60 py-3 transition-colors hover:bg-zinc-800/60 ${
           isOver ? "border-indigo-500/60" : "border-zinc-800"}`}>
         <ChevronsRight className="h-4 w-4 text-zinc-500" />
@@ -768,10 +812,11 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
     : isOver ? "border-indigo-500/60 bg-zinc-900/60" : "border-zinc-800 bg-zinc-900/60";
 
   return (
-    <section ref={setNodeRef}
-      className={`flex w-[82vw] max-w-xs shrink-0 snap-start flex-col rounded-xl border transition-colors md:w-auto md:max-w-none md:min-w-[11rem] md:flex-1 ${wrap}`}>
-      <ColumnHeader column={column} colorKey={colorKey} totalCount={totalCount} onToggle={onToggleCollapse}
-        hidden={hiddenCount > 0 || undefined} onToggleHidden={onToggleHidden} />
+    <section ref={setNodeRef} style={dragStyle}
+      className={`relative flex w-[82vw] max-w-xs shrink-0 snap-start flex-col rounded-xl border transition-colors md:w-auto md:max-w-none md:min-w-[14rem] md:flex-1 ${wrap}`}>
+      <span aria-hidden className={`pointer-events-none absolute inset-x-4 top-0 h-0.5 rounded-b-full ${PALETTE[colorKey].dot}`} />
+      <ColumnHeader column={column} colorKey={colorKey} autoColor={autoColor} totalCount={totalCount} onToggle={onToggleCollapse}
+        hidden={hiddenCount > 0 || undefined} onToggleHidden={onToggleHidden} edit={edit} handle={edit ? { attributes: sortable.attributes, listeners: sortable.listeners, setActivator: sortable.setActivatorNodeRef } : undefined} />
 
       {st === "over" && (
         <div className="mx-3 mb-2 flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs text-rose-300">
@@ -781,23 +826,22 @@ function KanbanColumn({ column, colorKey, cards, totalCount, collapsed, onToggle
       )}
 
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-3 pb-2">
+        <div className="flex min-h-[60px] flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3">
           {hiddenCount > 0 && (
             <button onClick={onToggleHidden} className="rounded-lg border border-dashed border-zinc-700 px-3 py-6 text-center text-xs text-zinc-500 hover:border-zinc-500 hover:text-zinc-300">
               {hiddenCount} card{hiddenCount === 1 ? "" : "s"} hidden — click to show
             </button>
           )}
-          {cards.length === 0 && hiddenCount === 0 && <EmptyDrop name={column.name} filtered={totalCount > 0} isOver={isOver} />}
+          {cards.length === 0 && hiddenCount === 0 && (totalCount > 0 || isOver) && <EmptyDrop filtered={totalCount > 0} isOver={isOver} />}
           <AnimatePresence initial={false}>
             {cards.map((c) => (
               <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
                 attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
             ))}
           </AnimatePresence>
+          {canEdit && <AddCard onAdd={onAdd} columnId={column.id} />}
         </div>
       </SortableContext>
-
-      {canEdit && <div className="p-3 pt-1"><AddCard onAdd={onAdd} columnId={column.id} /></div>}
     </section>
   );
 }

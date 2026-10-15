@@ -104,7 +104,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const boardCards = boards.map((b) => {
     const cols = columns.filter((c) => c.board_id === b.id);
     const segs = cols.map((c, i) => ({
-      name: c.name, key: columnColor(c.name, i), n: cards.filter((k) => k.column_id === c.id).length,
+      name: c.name, key: columnColor(c.name, i, c.color), n: cards.filter((k) => k.column_id === c.id).length,
     }));
     const total = segs.reduce((s, x) => s + x.n, 0);
     const limited = cols.filter((c) => c.wip_limit !== null);

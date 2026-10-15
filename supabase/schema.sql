@@ -982,3 +982,12 @@ end $$;
 -- '24:00:00' is a valid `time` and is stored for "ends at midnight".
 alter table public.cards add column if not exists start_time time;
 alter table public.cards add column if not exists due_time time;
+
+-- ---------- Column colour tag (migration 016) ----------
+-- Optional colour tag per column. null = automatic: the app derives a colour from the column's name/position.
+alter table public.columns add column if not exists color text;
+
+do $$ begin
+  alter table public.columns add constraint columns_color_check
+    check (color is null or color in ('slate','sky','teal','emerald','amber','orange','rose','pink','violet','indigo'));
+exception when duplicate_object then null; end $$;

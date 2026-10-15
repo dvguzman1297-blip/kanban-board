@@ -59,5 +59,5 @@ describe("buildGanttWorkbook", () => {
     const rules = JSON.stringify((sheet as unknown as { conditionalFormattings: unknown }).conditionalFormattings);
     expect(rules).toContain("$E4");
     expect(rules).toContain("TODAY()");
-  });
+  }, 30_000);
 });

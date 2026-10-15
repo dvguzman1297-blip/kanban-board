@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { BUCKET } from "@/lib/attachments";
 import { resolveInviteNotifications } from "@/lib/notifications-server";
+import { templateById } from "@/lib/board-templates";
+import { localISO, shiftISO } from "@/lib/timeline";
 
 // Storage files are not removed by DB cascades, so delete them explicitly first.
 async function removeFiles(supabase: Awaited<ReturnType<typeof createClient>>, column: "card_id" | "board_id", id: string) {
@@ -13,12 +15,8 @@ async function removeFiles(supabase: Awaited<ReturnType<typeof createClient>>, c
   if (paths.length) await supabase.storage.from(BUCKET).remove(paths);
 }
 
-const DEFAULT_COLS = [
-  { name: "Backlog", wip_limit: null }, { name: "Up Next", wip_limit: null },
-  { name: "In Progress", wip_limit: 3 }, { name: "Blocked", wip_limit: null }, { name: "Done", wip_limit: null },
-];
-
-export async function createBoard(name: string): Promise<{ error: string } | void> {
+export async function createBoard(name: string, templateId?: string, withExamples = false): Promise<{ error: string } | void> {
+  const template = templateById(templateId);
   const cleanName = name.trim().slice(0, 80);
   if (!cleanName) return { error: "Enter a board name." };
 
@@ -32,14 +30,29 @@ export async function createBoard(name: string): Promise<{ error: string } | voi
     console.error("createBoard: board insert failed", error);
     return { error: `Could not create board: ${error.message}` };
   }
-  const { error: columnsError } = await supabase.from("columns").insert(
-    DEFAULT_COLS.map((c, i) => ({ ...c, board_id: boardId, order_index: (i + 1) * 1000 }))
-  );
+  const { data: createdCols, error: columnsError } = await supabase.from("columns").insert(
+    template.columns.map((c, i) => ({ ...c, board_id: boardId, order_index: (i + 1) * 1000 }))
+  ).select("id, order_index");
   if (columnsError) {
     console.error("createBoard: default columns insert failed", columnsError);
     const { error: cleanupError } = await supabase.from("boards").delete().eq("id", boardId);
     if (cleanupError) console.error("createBoard: failed to clean up incomplete board", cleanupError);
     return { error: `Could not create the board's default columns: ${columnsError.message}` };
+  }
+  if (withExamples && template.examples.length && createdCols) {
+    const colIds = [...createdCols].sort((a, b) => a.order_index - b.order_index).map((c) => c.id as string);
+    const today = localISO(new Date());
+    const perColumn = new Map<number, number>();
+    const { error: cardsError } = await supabase.from("cards").insert(template.examples.map((c) => {
+      const n = (perColumn.get(c.column) ?? 0) + 1;
+      perColumn.set(c.column, n);
+      return {
+        board_id: boardId, column_id: colIds[c.column], title: c.title, description: c.description ?? null, priority: c.priority,
+        due_date: c.dueInDays === undefined ? null : shiftISO(today, c.dueInDays), order_index: n * 1000,
+        subtasks: (c.subtasks ?? []).map((t) => ({ id: crypto.randomUUID(), title: t, done: false })),
+      };
+    }));
+    if (cardsError) console.error("createBoard: example cards insert failed", cardsError); // the board itself is fine without them
   }
   revalidatePath("/", "layout");
   redirect(`/board/${boardId}`);
