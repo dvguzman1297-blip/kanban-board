@@ -27,6 +27,7 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [busyExport, setBusyExport] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const messages = chats[key] ?? [];
   const pending = pendingKey === key;
   const error = errors[key] ?? "";
@@ -36,8 +37,11 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Collapse when clicking anywhere outside the chat (its button included, since that one toggles).
+    const onPointerDown = (e: PointerEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => { window.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onPointerDown); };
   }, [open]);
 
   if (!boards.length) return null;
@@ -76,7 +80,7 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
   };
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[80] flex flex-col items-end gap-3 print:hidden">
+    <div ref={rootRef} className="pointer-events-none fixed bottom-4 right-4 z-[80] flex flex-col items-end gap-3 print:hidden">
       {open && (
         <section role="dialog" aria-label="AI assistant"
           className={`pointer-events-auto flex max-h-[calc(100dvh-6.5rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl transition-[width,height] ${expanded ? "h-[calc(100dvh-6.5rem)] w-[56rem]" : "h-[34rem] w-[24rem]"}`}>
