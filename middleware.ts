@@ -20,7 +20,24 @@ export async function middleware(req: NextRequest) {
       },
     }
   );
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  // Stale session cookie (refresh token no longer exists): drop it so we stop retrying every request
+  const staleSession = error?.code === "refresh_token_not_found" || error?.code === "refresh_token_already_used";
+  if (staleSession) {
+    const authCookies = req.cookies.getAll().filter(({ name }) => name.startsWith("sb-"));
+    const clearCookies = (r: NextResponse) => authCookies.forEach(({ name }) => r.cookies.delete(name));
+    if (path.startsWith("/auth") || path === "/invite/accept") {
+      authCookies.forEach(({ name }) => req.cookies.delete(name));
+      res = NextResponse.next({ request: req });
+      clearCookies(res);
+      return res;
+    }
+    const redirect = NextResponse.redirect(new URL("/auth/login", req.url));
+    clearCookies(redirect);
+    return redirect;
+  }
+
   const isAuthRoute = path.startsWith("/auth");
   const isInviteAcceptance = path === "/invite/accept";
   // These must stay reachable while signed in (recovery link creates a session)

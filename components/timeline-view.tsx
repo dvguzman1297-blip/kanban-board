@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarRange, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { downloadGanttXlsx } from "@/lib/gantt-export";
 import { PALETTE, effectiveColor, type ColorKey } from "@/lib/colors";
 import { isDoneName, toISO } from "@/lib/board-utils";
 import {
   MIN_DAY, applyGesture, cardDates, dayOffset, fromSpan, geometry, localISO, presets, pxPerDay, shiftISO, stepAnchor, toSpan,
   weekStart, windowFor, winLength, type GestureMode, type Mode, type Span, type Win,
 } from "@/lib/timeline";
-import type { Card, Column } from "@/lib/types";
+import type { Card, Column, Member } from "@/lib/types";
 
 export type TimelinePatch = Pick<Card, "start_date" | "due_date" | "start_time" | "due_time">;
 
@@ -58,11 +59,25 @@ function headerFor(mode: Mode, win: Win, today: string, k: number): { top: Seg[]
 
 type Gesture = { cardId: string; pointerId: number; mode: GestureMode; originX: number; deltaMin: number; base: Span };
 
-export function TimelineView({ columns, cards, colColors, onEdit, onChange }: {
+export function TimelineView({ columns, cards, colColors, onEdit, onChange, exportData }: {
   columns: Column[]; cards: Card[]; colColors: Record<string, ColorKey>;
   onEdit: (id: string) => void; onChange: (id: string, patch: TimelinePatch) => void;
+  /** Whole-board data for the Excel export (the view itself only shows filtered `cards`). */
+  exportData: { cards: Card[]; members: Member[]; boardName: string };
 }) {
   const today = toISO(new Date());
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const exportExcel = async () => {
+    setExporting(true); setExportError("");
+    try {
+      await downloadGanttXlsx({ ...exportData, columns, colColors, today });
+    } catch {
+      setExportError("Could not create the Excel file.");
+    } finally {
+      setExporting(false);
+    }
+  };
   const [mode, setMode] = useState<Mode>(() => {
     try { const v = localStorage.getItem(STORAGE_KEY); if (v === "day" || v === "week" || v === "month" || v === "quarter") return v; } catch {}
     return "week"; // default
@@ -161,6 +176,13 @@ export function TimelineView({ columns, cards, colColors, onEdit, onChange }: {
             <button onClick={() => step(1)} aria-label="Next" className="flex h-9 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-sm text-zinc-300 hover:border-zinc-700"><span className="hidden sm:inline">Next</span><ChevronRight className="h-4 w-4" /></button>
           </div>
           <h2 aria-live="polite" className="flex items-center gap-1.5 text-sm font-semibold"><CalendarRange className="h-4 w-4 text-zinc-500" />{rangeLabel}</h2>
+          <div className="ml-auto flex items-center gap-2">
+            {exportError && <span role="alert" className="text-xs text-rose-400">{exportError}</span>}
+            <button onClick={exportExcel} disabled={exporting || !exportData.cards.some((c) => !c.archived_at)} title="Download the whole board as an Excel Gantt chart"
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-300 hover:border-zinc-700 disabled:opacity-50">
+              <Download className="h-4 w-4" />{exporting ? "Exporting…" : "Export Excel"}
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-zinc-500">Quick range:</span>

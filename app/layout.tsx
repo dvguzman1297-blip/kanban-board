@@ -7,6 +7,7 @@ import { TopBar, type Alert } from "@/components/top-bar";
 import { FocusProvider } from "@/components/focus-drawer";
 import { ToastProvider } from "@/components/toast";
 import { overdueNotifications, type AppNotification, type OverdueCard } from "@/lib/notifications";
+import { AiChatWidget } from "@/components/ai-chat-widget";
 import { ThemeInitializer } from "@/components/theme-initializer";
 import { isThemePref } from "@/lib/theme";
 import { isBlockedLike, isDoneName, toISO } from "@/lib/board-utils";
@@ -85,6 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
             </div>
           </div>
+          <AiChatWidget boards={boardList.filter((b) => !b.is_archived).map((b) => ({ id: b.id as string, name: b.name as string }))} />
         </FocusProvider>
         </ToastProvider>
       </body>

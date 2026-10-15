@@ -569,7 +569,7 @@ export function BoardClient({ board, initialColumns, initialCards, initialAttach
       {view === "list" && <ListView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "calendar" && <CalendarView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId} />}
       {view === "timeline" && <TimelineView columns={initialColumns} cards={visible} colColors={colColors} onEdit={setEditingId}
-        onChange={(id, patch) => saveCard(id, patch)} />}
+        onChange={(id, patch) => saveCard(id, patch)} exportData={{ cards, members, boardName: name }} />}
 
       {view === "kanban" && (
         <DndContext id={`board-${board.id}`} sensors={sensors} collisionDetection={closestCorners}
