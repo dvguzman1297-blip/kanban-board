@@ -494,7 +494,7 @@ export function BoardClient({ board, initialColumns: serverColumns, initialCards
     return res.ok ? null : res.error;
   };
 
-  const cardProps = { attByCard, previews, canEdit, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }) };
+  const cardProps = { attByCard, previews, canEdit, onEdit: setEditingId, onDelete: removeCard, onRename: (id: string, title: string) => saveCard(id, { title }), onDueDate: (id: string, due: string | null) => saveCard(id, { due_date: due }) };
   const editFor = (): ColumnEdit | undefined => (canEdit ? { boardId: board.id, onChanged: () => router.refresh() } : undefined);
   const tplVars = {
     "--tpl-sm": initialColumns.map((c) => (collapsedCols.has(c.id) ? "2.75rem" : "minmax(78vw,1fr)")).join(" "),
@@ -618,7 +618,7 @@ export function BoardClient({ board, initialColumns: serverColumns, initialCards
             </p>
           )}
           {!lanesOn ? (
-            <div className="flex flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4 pb-24 md:gap-4 md:p-6 md:pb-24">
+            <div className="flex flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4 md:gap-4 md:p-6">
               <SortableContext items={initialColumns.map((c) => COL_PREFIX + c.id)} strategy={horizontalListSortingStrategy}>
               {initialColumns.map((col) => (
                 <KanbanColumn key={col.id} edit={editFor()} column={col} colorKey={colColors[col.id]} autoColor={autoColors[col.id]} cards={byColumn[col.id] ?? []}
@@ -720,7 +720,7 @@ export function BoardClient({ board, initialColumns: serverColumns, initialCards
 const COL_PREFIX = "col|"; // sortable id of a column, to tell it apart from card and column-drop ids
 type CardActions = {
   attByCard: Record<string, Attachment[]>; previews: boolean; canEdit: boolean;
-  onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
+  onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void; onDueDate: (id: string, due: string | null) => void;
 };
 
 type ColumnHandle = Pick<ReturnType<typeof useSortable>, "attributes" | "listeners"> & { setActivator: (el: HTMLElement | null) => void };
@@ -783,7 +783,7 @@ function EmptyDrop({ filtered, isOver }: { filtered: boolean; isOver: boolean })
   );
 }
 
-function KanbanColumn({ column, colorKey, autoColor, cards, totalCount, collapsed, onToggleCollapse, hiddenCount = 0, onToggleHidden, onAdd, edit, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
+function KanbanColumn({ column, colorKey, autoColor, cards, totalCount, collapsed, onToggleCollapse, hiddenCount = 0, onToggleHidden, onAdd, edit, attByCard, previews, canEdit, onEdit, onDelete, onRename, onDueDate }: {
   column: Column; colorKey: ColorKey; autoColor: ColorKey; cards: Card[]; totalCount: number; collapsed: boolean; edit?: ColumnEdit;
   onToggleCollapse: () => void; hiddenCount?: number; onToggleHidden?: () => void; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
@@ -836,7 +836,7 @@ function KanbanColumn({ column, colorKey, autoColor, cards, totalCount, collapse
           <AnimatePresence initial={false}>
             {cards.map((c) => (
               <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
-                attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
+                attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} onDueDate={onDueDate} />
             ))}
           </AnimatePresence>
           {canEdit && <AddCard onAdd={onAdd} columnId={column.id} />}
@@ -846,7 +846,7 @@ function KanbanColumn({ column, colorKey, autoColor, cards, totalCount, collapse
   );
 }
 
-function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename }: {
+function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCard, previews, canEdit, onEdit, onDelete, onRename, onDueDate }: {
   laneKey: string; column: Column; colorKey: ColorKey; cards: Card[]; collapsed: boolean; onAdd: (title: string) => Promise<void>;
 } & CardActions) {
   const { setNodeRef, isOver } = useDroppable({ id: `cell|${laneKey}|${column.id}` });
@@ -859,7 +859,7 @@ function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCar
         <AnimatePresence initial={false}>
           {cards.map((c) => (
             <SortableCard key={c.id} card={c} colorKey={effectiveColor(c.color, colorKey)}
-              attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} />
+              attachments={attByCard[c.id] ?? []} previews={previews} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onRename={onRename} onDueDate={onDueDate} />
           ))}
         </AnimatePresence>
       </SortableContext>
@@ -868,9 +868,9 @@ function LaneCell({ laneKey, column, colorKey, cards, collapsed, onAdd, attByCar
   );
 }
 
-function SortableCard({ card, colorKey, attachments, previews, canEdit, onEdit, onDelete, onRename }: {
+function SortableCard({ card, colorKey, attachments, previews, canEdit, onEdit, onDelete, onRename, onDueDate }: {
   card: Card; colorKey: ColorKey; attachments: Attachment[]; previews: boolean; canEdit: boolean;
-  onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void;
+  onEdit: (id: string) => void; onDelete: (id: string) => void; onRename: (id: string, title: string) => void; onDueDate: (id: string, due: string | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, disabled: !canEdit });
   return (
@@ -879,7 +879,7 @@ function SortableCard({ card, colorKey, attachments, previews, canEdit, onEdit, 
         {...attributes} {...listeners}>
         <CardView card={card} colorKey={colorKey} attachments={attachments} showPreviews={previews}
           canEdit={canEdit}
-          onEdit={() => onEdit(card.id)} onRename={(t) => onRename(card.id, t)}
+          onEdit={() => onEdit(card.id)} onRename={(t) => onRename(card.id, t)} onDueDate={(d) => onDueDate(card.id, d)}
           onDelete={() => confirm("Delete this card?") && onDelete(card.id)} />
       </div>
     </motion.div>

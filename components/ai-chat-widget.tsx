@@ -80,7 +80,7 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
   };
 
   return (
-    <div ref={rootRef} className="pointer-events-none fixed bottom-4 right-4 z-[80] flex flex-col items-end gap-3 print:hidden">
+    <div ref={rootRef} className="pointer-events-none fixed bottom-4 right-8 z-[80] flex flex-col items-end gap-3 print:hidden">
       {open && (
         <section role="dialog" aria-label="AI assistant"
           className={`pointer-events-auto flex max-h-[calc(100dvh-6.5rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl transition-[width,height] ${expanded ? "h-[calc(100dvh-6.5rem)] w-[56rem]" : "h-[34rem] w-[24rem]"}`}>
@@ -161,7 +161,7 @@ export function AiChatWidget({ boards }: { boards: { id: string; name: string }[
         </section>
       )}
       <button onClick={() => setOpen((o) => !o)} aria-label={open ? "Close AI chat" : "Open AI chat"} aria-expanded={open} title={open ? "Close AI chat" : "Ask AI about your boards"}
-        className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-black/40 transition hover:scale-105 hover:bg-indigo-500">
+        className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600  text-white shadow-lg shadow-black/40 transition hover:scale-105 hover:bg-indigo-500">
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
       </button>
     </div>

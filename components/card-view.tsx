@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { Calendar, CheckSquare, FileText, Flag, GripVertical, Paperclip, PencilLine, Play, SquarePen, Trash2, Zap } from "lucide-react";
+import { Calendar, CheckSquare, FileText, Flag, GripVertical, Paperclip, PencilLine, Play, SquarePen, Trash2, X, Zap } from "lucide-react";
 import { useFocus } from "@/components/focus-drawer";
 import { PALETTE, type ColorKey } from "@/lib/colors";
 import { isImage } from "@/lib/attachments";
@@ -39,9 +39,32 @@ export function EnergyBadge({ value }: { value: Card["energy_level"] }) {
   );
 }
 
-export function CardView({ card, colorKey, overlay, attachments = [], showPreviews = true, canEdit = true, onEdit, onDelete, onRename }: {
+// Click the date to change it with the native picker; empty dates show "Add date" on hover. Esc / outside click just closes the picker.
+function DueDateButton({ value, onChange, stop }: { value: string | null; onChange: (due: string | null) => void; stop: { onPointerDown: (e: React.PointerEvent) => void } }) {
+  const input = useRef<HTMLInputElement>(null);
+  const open = () => { try { input.current?.showPicker(); } catch { input.current?.focus(); input.current?.click(); } };
+  return (
+    <span className={`group/due relative flex items-center ${value ? "" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"}`}>
+      <button type="button" {...stop} onClick={(e) => { e.stopPropagation(); open(); }}
+        title={value ? "Change due date" : "Add due date"} aria-label={value ? `Due ${value}, change` : "Add due date"}
+        className="flex items-center gap-1 text-zinc-500 underline-offset-2 hover:text-zinc-200 hover:underline">
+        <Calendar className="h-3 w-3" />{value ?? "Add date"}
+      </button>
+      <input ref={input} type="date" value={value ?? ""} tabIndex={-1} aria-hidden {...stop}
+        onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}
+        onChange={(e) => { if (e.target.value !== (value ?? "")) onChange(e.target.value || null); }}
+        className="pointer-events-none absolute bottom-0 left-0 h-0 w-0 opacity-0" />
+      {value && (
+        <button type="button" {...stop} onClick={(e) => { e.stopPropagation(); onChange(null); }} title="Clear due date" aria-label="Clear due date"
+          className="invisible absolute left-full top-1/2 z-10 ml-0.5 -translate-y-1/2 rounded bg-zinc-900 p-0.5 text-zinc-400 hover:text-rose-400 group-hover/due:visible focus-visible:visible"><X className="h-3 w-3" /></button>
+      )}
+    </span>
+  );
+}
+
+export function CardView({ card, colorKey, overlay, attachments = [], showPreviews = true, canEdit = true, onEdit, onDelete, onRename, onDueDate }: {
   card: Card; colorKey: ColorKey; overlay?: boolean; attachments?: Attachment[]; showPreviews?: boolean; canEdit?: boolean;
-  onEdit?: () => void; onDelete?: () => void; onRename?: (title: string) => void;
+  onEdit?: () => void; onDelete?: () => void; onRename?: (title: string) => void; onDueDate?: (due: string | null) => void;
 }) {
   const { startFocus } = useFocus();
   const assignee = useMembers().find((m) => m.id === card.assignee_id);
@@ -110,7 +133,11 @@ export function CardView({ card, colorKey, overlay, attachments = [], showPrevie
           {card.archived_at && <span className="rounded bg-zinc-700/60 px-1.5 py-0.5 text-zinc-300">Archived</span>}
           <PriorityBadge value={card.priority} />
           <EnergyBadge value={card.energy_level} />
-          {card.due_date && <span className="flex items-center gap-1 text-zinc-500"><Calendar className="h-3 w-3" />{card.due_date}</span>}
+          {canEdit && !overlay && onDueDate ? (
+            <DueDateButton value={card.due_date} onChange={onDueDate} stop={stop} />
+          ) : card.due_date ? (
+            <span className="flex items-center gap-1 text-zinc-500"><Calendar className="h-3 w-3" />{card.due_date}</span>
+          ) : null}
           {subs.length > 0 && <span title="Subtasks done" className="flex items-center gap-1 text-zinc-500"><CheckSquare className="h-3 w-3" />{done}/{subs.length}</span>}
           {attachments.length > 0 && <span className="flex items-center gap-0.5 text-zinc-500"><Paperclip className="h-3 w-3" />{attachments.length}</span>}
           {assignee && (
